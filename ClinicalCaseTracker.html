@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clinical Case Tracker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f0f6ff; min-height: 100vh; }
+  input, textarea, select, button { font-family: inherit; }
+  input, textarea, select { width: 100%; padding: 8px 11px; border-radius: 7px; border: 1.5px solid #e2e8f0; font-size: 13px; outline: none; background: #f8fafc; color: #1e293b; }
+  input:focus, textarea:focus, select:focus { border-color: #0ea5e9; }
+  textarea { resize: vertical; }
+  button { cursor: pointer; }
+  .badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .overlay { position: fixed; inset: 0; background: rgba(10,15,30,0.6); display: flex; align-items: flex-start; justify-content: center; z-index: 100; padding: 16px; overflow-y: auto; }
+  .modal { background: #fff; border-radius: 14px; width: 100%; max-width: 600px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); margin-top: 8px; }
+  .section-head { display: flex; align-items: center; gap: 7px; margin: 16px 0 12px; border-top: 1px solid #f1f5f9; padding-top: 14px; font-size: 13px; font-weight: 700; }
+  .field-label { font-size: 10px; font-weight: 700; color: #94a3b8; letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .field-wrap { margin-bottom: 11px; }
+  .card { background: #fff; border-radius: 12px; padding: 14px 16px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: transform 0.15s, box-shadow 0.15s; position: relative; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(14,165,233,0.13); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1e293b; color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; font-weight: 600; z-index: 999; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .toast.error { background: #dc2626; }
+  .toast.success { background: #10b981; }
+  @media (max-width: 600px) {
+    .grid { grid-template-columns: 1fr; }
+    .grid3 { grid-template-columns: 1fr 1fr !important; }
+    .modal { margin-top: 0; border-radius: 14px 14px 0 0; }
+    .overlay { align-items: flex-end; padding: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script>
+// ── Config ─────────────────────────────────────────────────────────────────
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbydaqBZ1iTMTkk6cWB_ZEUN1I4q7qkGwEHArvGXlCjkC70ue90-mKad7S9EenicKyaa/exec";
+const APP_VERSION = "1.0";
+
+// ── Constants ──────────────────────────────────────────────────────────────
+const TAGS = ["Supervision","Meeting","Conference","Peer Review","MDT"];
+const TAG_COLORS = {
+  "Supervision":  {bg:"#EEF2FF",text:"#4338ca",border:"#c7d2fe"},
+  "Meeting":      {bg:"#F0FDF4",text:"#15803d",border:"#bbf7d0"},
+  "Conference":   {bg:"#FFF7ED",text:"#c2410c",border:"#fed7aa"},
+  "Peer Review":  {bg:"#FDF4FF",text:"#9333ea",border:"#e9d5ff"},
+  "MDT":          {bg:"#F0F9FF",text:"#0369a1",border:"#bae6fd"}
+};
+const COMPLEXITY = ["Low","Moderate","High","Complex"];
+const COMPLEXITY_COLORS = {
+  "Low":     {bg:"#f0fdf4",text:"#16a34a",dot:"#22c55e"},
+  "Moderate":{bg:"#fffbeb",text:"#b45309",dot:"#f59e0b"},
+  "High":    {bg:"#fff7ed",text:"#c2410c",dot:"#f97316"},
+  "Complex": {bg:"#fff1f2",text:"#be123c",dot:"#f43f5e"}
+};
+const FOLLOWUP_STATUS = ["Pending","Discussed","Resolved","Ongoing"];
+const FOLLOWUP_COLORS = {
+  "Pending":  {bg:"#fffbeb",text:"#92400e",border:"#fde68a"},
+  "Discussed":{bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"},
+  "Resolved": {bg:"#f0fdf4",text:"#166534",border:"#bbf7d0"},
+  "Ongoing":  {bg:"#fdf4ff",text:"#7e22ce",border:"#e9d5ff"}
+};
+
+// ── State ──────────────────────────────────────────────────────────────────
+let state = {
+  authed: false,
+  password: "",
+  patients: [],
+  view: "list",
+  editing: null,
+  viewing: null,
+  formData: null,
+  filterTag: "All",
+  search: "",
+  sortBy: "dateAdded",
+  syncing: false,
+  lastSync: null
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function isOverdue(p) {
+  if (!p.followUpDate) return false;
+  if (p.followUpStatus === "Resolved" || p.followUpStatus === "Discussed") return false;
+  return new Date(p.followUpDate) < new Date();
+}
+function emptyForm() {
+  return {name:"",nameNote:"",age:"",gender:"",diagnosis:"",presenting:"",clinicalNotes:"",discussionPoints:"",followUpDate:"",followUpStatus:"Pending",followUpNotes:"",tags:[],complexity:"",riskFlag:false,dateAdded:new Date().toISOString().split("T")[0],sessionNotes:[]};
+}
+function quickDate(days) {
+  const d = new Date(); d.setDate(d.getDate()+days); return d.toISOString().split("T")[0];
+}
+function fmtDate(str, long) {
+  if (!str) return "";
+  try { return new Date(str).toLocaleDateString("en-GB", long ? {day:"numeric",month:"long",year:"numeric"} : {day:"numeric",month:"short",year:"numeric"}); } catch { return str; }
+}
+function saveLocal() {
+  try { localStorage.setItem("cct_cases", JSON.stringify(state.patients)); localStorage.setItem("cct_pw", state.password); } catch {}
+}
+function loadLocal() {
+  try {
+    const pw = localStorage.getItem("cct_pw");
+    const cases = localStorage.getItem("cct_cases");
+    if (pw) state.password = pw;
+    if (cases) state.patients = JSON.parse(cases);
+  } catch {}
+}
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function syncFromSheets() {
+  state.syncing = true; render();
+  try {
+    const res = await fetch(`${SCRIPT_URL}?password=${encodeURIComponent(state.password)}`);
+    const data = await res.json();
+    if (data.error === "Unauthorized") { state.authed = false; state.password = ""; render(); showToast("Incorrect password","error"); return; }
+    if (data.cases) { state.patients = data.cases; saveLocal(); }
+    state.lastSync = new Date();
+    showToast("Synced with Google Sheets ✓","success");
+  } catch(e) {
+    showToast("Sync failed — using local data","error");
+  }
+  state.syncing = false; render();
+}
+
+async function syncToSheets() {
+  state.syncing = true; render();
+  try {
+    const res = await fetch(SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({password: state.password, action: "save", cases: state.patients})
+    });
+    const data = await res.json();
+    if (data.error) { showToast("Save failed: " + data.error, "error"); }
+    else { state.lastSync = new Date(); showToast("Saved to Google Sheets ✓","success"); }
+  } catch(e) {
+    showToast("Save failed — check connection","error");
+  }
+  state.syncing = false; render();
+}
+
+// ── DOM helpers ────────────────────────────────────────────────────────────
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  if (attrs) Object.entries(attrs).forEach(([k,v]) => {
+    if (k === "style" && typeof v === "object") Object.assign(e.style, v);
+    else if (k === "className") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(), v);
+    else e.setAttribute(k, v);
+  });
+  children.flat().forEach(c => {
+    if (c == null || c === false) return;
+    e.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  });
+  return e;
+}
+function txt(t) { return document.createTextNode(t||""); }
+
+let toastTimer;
+function showToast(msg, type="") {
+  const existing = document.querySelector(".toast");
+  if (existing) existing.remove();
+  clearTimeout(toastTimer);
+  const t = el("div",{className:`toast ${type}`},msg);
+  document.body.appendChild(t);
+  toastTimer = setTimeout(()=>t.remove(), 3000);
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function render() {
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+  if (!state.authed) { root.appendChild(renderLogin()); return; }
+  root.appendChild(renderMain());
+}
+
+// ── Login ──────────────────────────────────────────────────────────────────
+function renderLogin() {
+  const wrap = el("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#0c1445,#1e3a8a,#0369a1)",padding:"20px"}});
+  const box = el("div",{style:{background:"#fff",borderRadius:"16px",padding:"36px 32px",width:"100%",maxWidth:"380px",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",textAlign:"center"}});
+  box.appendChild(el("div",{style:{fontSize:"36px",marginBottom:"12px"}},"🩺"));
+  box.appendChild(el("h1",{style:{fontSize:"20px",fontWeight:"700",color:"#0f172a",marginBottom:"4px"}},"Clinical Case Tracker"));
+  box.appendChild(el("p",{style:{fontSize:"12px",color:"#94a3b8",marginBottom:"24px"}},"Enter your password to continue"));
+  const pwInput = el("input",{type:"password",placeholder:"Password",style:{marginBottom:"12px",fontSize:"14px",textAlign:"center"}});
+  const errMsg = el("div",{style:{fontSize:"12px",color:"#dc2626",marginBottom:"8px",minHeight:"16px"}});
+  const btn = el("button",{style:{width:"100%",padding:"10px",borderRadius:"8px",border:"none",background:"linear-gradient(135deg,#0ea5e9,#6366f1)",color:"#fff",fontSize:"14px",fontWeight:"700"}},state.syncing ? "Connecting…" : "Sign In");
+  btn.addEventListener("click", async () => {
+    const pw = pwInput.value.trim();
+    if (!pw) { errMsg.textContent = "Please enter a password."; return; }
+    state.password = pw;
+    state.authed = true;
+    await syncFromSheets();
+  });
+  pwInput.addEventListener("keydown", e => { if (e.key==="Enter") btn.click(); });
+  box.appendChild(pwInput);
+  box.appendChild(errMsg);
+  box.appendChild(btn);
+  box.appendChild(el("p",{style:{fontSize:"11px",color:"#cbd5e1",marginTop:"16px"}},"Data syncs with Google Sheets"));
+  wrap.appendChild(box);
+  return wrap;
+}
+
+// ── Main ───────────────────────────────────────────────────────────────────
+function renderMain() {
+  const wrap = el("div",{style:{minHeight:"100vh",background:"#f0f6ff"}});
+  wrap.appendChild(renderHeader());
+  wrap.appendChild(renderFilterBar());
+  wrap.appendChild(renderList());
+  if (state.view === "form") wrap.appendChild(renderOverlay(renderForm()));
+  if (state.view === "detail" && state.viewing) wrap.appendChild(renderOverlay(renderDetail()));
+  return wrap;
+}
+
+function renderHeader() {
+  const ps = state.patients;
+  const overdueCount = ps.filter(isOverdue).length;
+  const riskCount = ps.filter(p=>p.riskFlag).length;
+  const tagCounts = {};
+  TAGS.forEach(t => tagCounts[t] = ps.filter(p=>p.tags&&p.tags.includes(t)).length);
+
+  const hdr = el("div",{style:{background:"linear-gradient(135deg,#0c1445,#1e3a8a,#0369a1)",padding:"20px",color:"#fff"}});
+  const top = el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"10px",marginBottom:"14px"}});
+  const titleWrap = el("div",{});
+  titleWrap.appendChild(el("h1",{style:{fontSize:"20px",fontWeight:"700",margin:"0 0 2px",color:"#fff"}},"Clinical Case Tracker"));
+  titleWrap.appendChild(el("p",{style:{margin:"0",color:"#93c5fd",fontSize:"11px"}},"Supervision · Meetings · Conferences · MDT"));
+  const syncInfo = el("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.45)",marginTop:"3px"}}, state.lastSync ? `Last sync: ${state.lastSync.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}` : "Not yet synced");
+  titleWrap.appendChild(syncInfo);
+  top.appendChild(titleWrap);
+
+  const btnWrap = el("div",{style:{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}});
+  const syncBtn = el("button",{style:{padding:"7px 14px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:"12px",fontWeight:"600"},onClick:syncFromSheets},state.syncing ? "⟳ Syncing…" : "⟳ Sync");
+  btnWrap.appendChild(syncBtn);
+  const newBtn = el("button",{style:{padding:"7px 16px",borderRadius:"8px",border:"none",background:"#fff",color:"#1e3a8a",fontSize:"13px",fontWeight:"700"},onClick:()=>{state.formData=emptyForm();state.editing=null;state.view="form";render();}},"+ New Case");
+  btnWrap.appendChild(newBtn);
+  top.appendChild(btnWrap);
+  hdr.appendChild(top);
+
+  const statsRow = el("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap"}});
+  const stats = [
+    {label:"Total",val:ps.length,icon:"🗂️"},
+    ...TAGS.map(t=>({label:t,val:tagCounts[t]||0})),
+    ...(riskCount>0?[{label:"Risk Flagged",val:riskCount,icon:"⚠️",warn:true}]:[]),
+    ...(overdueCount>0?[{label:"Overdue",val:overdueCount,icon:"🔴",warn:true}]:[])
+  ];
+  stats.forEach(s => {
+    const chip = el("div",{style:{background:s.warn?"rgba(248,113,113,0.2)":"rgba(255,255,255,0.1)",borderRadius:"7px",padding:"5px 11px",border:s.warn?"1px solid rgba(248,113,113,0.4)":"none"}});
+    chip.appendChild(el("div",{style:{fontSize:"15px",fontWeight:"700",color:"#fff"}},`${s.icon||""} ${s.val}`));
+    chip.appendChild(el("div",{style:{fontSize:"9px",color:s.warn?"#fca5a5":"#93c5fd"}},s.label));
+    statsRow.appendChild(chip);
+  });
+  hdr.appendChild(statsRow);
+  return hdr;
+}
+
+function renderFilterBar() {
+  const bar = el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}});
+  const row = el("div",{style:{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}});
+
+  const searchInput = el("input",{type:"text",placeholder:"Search cases…",value:state.search||"",style:{flex:"1",minWidth:"120px",padding:"6px 10px",fontSize:"12px"}});
+  searchInput.addEventListener("input",e=>{state.search=e.target.value;render();});
+  row.appendChild(searchInput);
+
+  const tagRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
+  ["All",...TAGS].forEach(tag=>{
+    const active=(state.filterTag||"All")===tag;
+    const count=tag==="All"?state.patients.length:state.patients.filter(p=>p.tags&&p.tags.includes(tag)).length;
+    const b=el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?"#1e3a8a":"#f1f5f9",color:active?"#fff":"#64748b",border:active?"1.5px solid #1e3a8a":"1.5px solid #e2e8f0"},onClick:()=>{state.filterTag=tag;render();}},`${tag} (${count})`);
+    tagRow.appendChild(b);
+  });
+  row.appendChild(tagRow);
+
+  const sortSel = el("select",{style:{padding:"5px 8px",fontSize:"11px",color:"#64748b",background:"#f8fafc",width:"auto"},onChange:e=>{state.sortBy=e.target.value;render();}});
+  [["dateAdded","Date Added"],["followUpDate","Follow-up"],["complexity","Complexity"],["name","Name"]].forEach(([v,l])=>{
+    const o=el("option",{value:v},l);
+    if(state.sortBy===v)o.selected=true;
+    sortSel.appendChild(o);
+  });
+  row.appendChild(sortSel);
+  bar.appendChild(row);
+  return bar;
+}
+
+function renderList() {
+  const wrap = el("div",{style:{padding:"16px 16px 100px"}});
+  let list = [...state.patients];
+  const ft = state.filterTag||"All";
+  if (ft!=="All") list=list.filter(p=>p.tags&&p.tags.includes(ft));
+  if (state.search&&state.search.trim()) {
+    const q=state.search.toLowerCase();
+    list=list.filter(p=>p.name.toLowerCase().includes(q)||(p.diagnosis||"").toLowerCase().includes(q)||(p.discussionPoints||"").toLowerCase().includes(q));
+  }
+  const sortFns = {
+    dateAdded:(a,b)=>new Date(b.dateAdded)-new Date(a.dateAdded),
+    followUpDate:(a,b)=>{if(!a.followUpDate)return 1;if(!b.followUpDate)return -1;return new Date(a.followUpDate)-new Date(b.followUpDate);},
+    complexity:(a,b)=>COMPLEXITY.indexOf(b.complexity)-COMPLEXITY.indexOf(a.complexity),
+    name:(a,b)=>a.name.localeCompare(b.name)
+  };
+  list.sort(sortFns[state.sortBy||"dateAdded"]);
+
+  if (list.length===0) {
+    const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});
+    empty.appendChild(el("div",{style:{fontSize:"40px",marginBottom:"10px"}},"🩺"));
+    empty.appendChild(el("div",{style:{fontSize:"16px",fontWeight:"600",color:"#475569",marginBottom:"5px"}},"No cases found"));
+    empty.appendChild(el("div",{style:{fontSize:"12px"}},"Add a new case or adjust your filters."));
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  const groups={};
+  TAGS.forEach(t=>{const c=list.filter(p=>p.tags&&p.tags.includes(t));if(c.length)groups[t]=c;});
+  const untagged=list.filter(p=>!p.tags||!p.tags.length);
+  if(untagged.length)groups["Untagged"]=untagged;
+
+  Object.entries(groups).forEach(([group,cases])=>{
+    const gw=el("div",{style:{marginBottom:"22px"}});
+    const gh=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"10px"}});
+    const tc=TAG_COLORS[group];
+    if(tc){gh.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},group));}
+    else{gh.appendChild(el("span",{style:{fontSize:"13px",fontWeight:"700",color:"#1e293b"}},group));}
+    gh.appendChild(el("span",{style:{fontSize:"11px",color:"#94a3b8"}},`${cases.length} case${cases.length!==1?"s":""}`));
+    gh.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
+    gw.appendChild(gh);
+    const grid=el("div",{className:"grid"});
+    cases.forEach(p=>grid.appendChild(renderCard(p)));
+    gw.appendChild(grid);
+    wrap.appendChild(gw);
+  });
+  return wrap;
+}
+
+function renderCard(p) {
+  const od=isOverdue(p);
+  const card=el("div",{className:"card",style:{border:od?"1.5px solid #fca5a5":p.riskFlag?"1.5px solid #fda4af":"1.5px solid #e2e8f0"},onClick:()=>{state.viewing=p;state.view="detail";render();}});
+
+  // Name row
+  const nr=el("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap",marginBottom:"2px",paddingRight:"20px"}});
+  nr.appendChild(el("span",{style:{fontSize:"15px",fontWeight:"700",color:"#0f172a"}},p.name));
+  if(p.riskFlag)nr.appendChild(el("span",{className:"badge",style:{background:"#fff1f2",color:"#be123c",border:"1.5px solid #fda4af",fontSize:"10px"}},"⚠ RISK"));
+  if(od)nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"2px 6px",borderRadius:"5px"}},"OVERDUE"));
+  card.appendChild(nr);
+  if(p.nameNote)card.appendChild(el("div",{style:{fontSize:"10px",color:"#b0bec5",marginBottom:"2px"}},p.nameNote));
+  const meta=[p.age&&`Age ${p.age}`,p.gender].filter(Boolean).join(" · ");
+  if(meta)card.appendChild(el("div",{style:{fontSize:"11px",color:"#94a3b8",marginBottom:"7px"}},meta));
+  if(p.diagnosis)card.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",fontStyle:"italic",marginBottom:"6px"}},p.diagnosis));
+  if(p.discussionPoints){
+    const dq=el("div",{style:{fontSize:"11px",color:"#64748b",marginBottom:"7px",lineHeight:"1.5",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:"2",WebkitBoxOrient:"vertical"}});
+    dq.appendChild(el("b",{style:{color:"#94a3b8",fontWeight:"700"}},"Q: "));
+    dq.appendChild(txt(p.discussionPoints));
+    card.appendChild(dq);
+  }
+  if(p.followUpStatus||p.followUpDate){
+    const fr=el("div",{style:{display:"flex",alignItems:"center",gap:"5px",marginBottom:"7px",flexWrap:"wrap"}});
+    if(p.followUpStatus){const fc=FOLLOWUP_COLORS[p.followUpStatus];fr.appendChild(el("span",{className:"badge",style:{background:fc.bg,color:fc.text,border:`1.5px solid ${fc.border}`}},`↻ ${p.followUpStatus}`));}
+    if(p.followUpDate)fr.appendChild(el("span",{style:{fontSize:"10px",color:"#94a3b8"}},fmtDate(p.followUpDate)));
+    card.appendChild(fr);
+  }
+  const tagRow=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"4px",marginBottom:"8px"}});
+  const tagsWrap=el("div",{style:{display:"flex",flexWrap:"wrap",gap:"3px"}});
+  (p.tags||[]).forEach(t=>{const tc=TAG_COLORS[t];if(tc)tagsWrap.appendChild(el("span",{style:{display:"inline-flex",padding:"1px 7px",borderRadius:"20px",fontSize:"9px",fontWeight:"700",background:tc.bg,color:tc.text,border:`1px solid ${tc.border}`}},t));});
+  tagRow.appendChild(tagsWrap);
+  if(p.complexity){const cc=COMPLEXITY_COLORS[p.complexity];tagRow.appendChild(el("span",{style:{display:"inline-flex",alignItems:"center",gap:"3px",fontSize:"10px",fontWeight:"700",color:cc.text,background:cc.bg,padding:"2px 7px",borderRadius:"5px"}},`● ${p.complexity}`));}
+  card.appendChild(tagRow);
+
+  const actRow=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:"8px",borderTop:"1px solid #f1f5f9"}});
+  actRow.appendChild(el("span",{style:{fontSize:"10px",color:"#cbd5e1"}},fmtDate(p.dateAdded)));
+  const btns=el("div",{style:{display:"flex",gap:"4px"}});
+  const editBtn=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #e2e8f0",background:"#f8fafc",color:"#64748b",fontSize:"10px",fontWeight:"600"}},"Edit");
+  editBtn.addEventListener("click",e=>{e.stopPropagation();state.formData={...p,sessionNotes:[...(p.sessionNotes||[])]};state.editing=p.id;state.view="form";render();});
+  btns.appendChild(editBtn);
+  const delBtn=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑 Delete");
+  delBtn.addEventListener("click",e=>{e.stopPropagation();state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();render();});
+  btns.appendChild(delBtn);
+  actRow.appendChild(btns);
+  card.appendChild(actRow);
+  return card;
+}
+
+function renderOverlay(content) {
+  const overlay=el("div",{className:"overlay"});
+  const modal=el("div",{className:"modal"});
+  overlay.addEventListener("click",e=>{if(e.target===overlay){state.view="list";render();}});
+  modal.appendChild(content);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+// ── Form ───────────────────────────────────────────────────────────────────
+function renderForm() {
+  const fd=state.formData||emptyForm();
+  const wrap=el("div",{style:{padding:"20px 22px 24px"}});
+
+  const hdr=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}});
+  hdr.appendChild(el("h2",{style:{fontSize:"17px",fontWeight:"700",color:"#0f172a",margin:"0"}},state.editing?"Edit Case":"New Case"));
+  const closeBtn=el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",lineHeight:"1"},onClick:()=>{state.view="list";render();}},"×");
+  hdr.appendChild(closeBtn);
+  wrap.appendChild(hdr);
+
+  function secHead(icon,title,color){const s=el("div",{className:"section-head",style:{color}});s.appendChild(el("span",{},icon));s.appendChild(el("span",{},title));return s;}
+  function lbl(text,required){const d=el("div",{className:"field-label"});d.appendChild(el("span",{},text+(required?" *":"")));return d;}
+  function inp(ph,val,key,type="text"){
+    const i=el("input",{type,placeholder:ph||"",value:val||""});
+    i.addEventListener("input",e=>{fd[key]=e.target.value;});
+    i.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});
+    i.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});
+    return i;
+  }
+  function ta(ph,val,key,rows=3){
+    const t=el("textarea",{placeholder:ph||"",rows},val||"");
+    t.addEventListener("input",e=>{fd[key]=e.target.value;});
+    t.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});
+    t.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});
+    return t;
+  }
+  function selEl(opts,val,key){
+    const s=el("select");
+    s.appendChild(el("option",{value:""},"Select…"));
+    opts.forEach(o=>{const opt=el("option",{value:o},o);if(val===o)opt.selected=true;s.appendChild(opt);});
+    s.addEventListener("change",e=>{fd[key]=e.target.value;});
+    return s;
+  }
+  function fw(label,required,child){const d=el("div",{className:"field-wrap"});d.appendChild(lbl(label,required));d.appendChild(child);return d;}
+
+  // Identity
+  const idBox=el("div",{style:{background:"#f8faff",border:"1px solid #e0e7ff",borderRadius:"9px",padding:"12px 14px",marginBottom:"12px"}});
+  idBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#6366f1",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"8px"}},"🔒 Patient Identity"));
+  idBox.appendChild(fw("Name / Identifier",true,inp("e.g. J.S., Patient A…",fd.name,"name")));
+  idBox.appendChild(fw("Privacy Reminder",false,inp("e.g. initials only, de-identified…",fd.nameNote,"nameNote")));
+  wrap.appendChild(idBox);
+
+  const g3=el("div",{className:"grid3",style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 10px"}});
+  g3.appendChild(fw("Age",false,inp("34",fd.age,"age")));
+  g3.appendChild(fw("Gender",false,selEl(["Male","Female","Non-binary","Prefer not to say","Other"],fd.gender,"gender")));
+  g3.appendChild(fw("Date Added",false,inp("",fd.dateAdded,"dateAdded","date")));
+  wrap.appendChild(g3);
+
+  // Risk
+  wrap.appendChild(secHead("⚠️","Risk","#be123c"));
+  const riskBox=el("div",{style:{display:"flex",alignItems:"center",gap:"9px",marginBottom:"12px",background:fd.riskFlag?"#fff1f2":"#f8fafc",border:`1.5px solid ${fd.riskFlag?"#fda4af":"#e2e8f0"}`,borderRadius:"7px",padding:"9px 12px",cursor:"pointer"}});
+  const chkDiv=el("div",{style:{width:"16px",height:"16px",borderRadius:"3px",border:`2px solid ${fd.riskFlag?"#be123c":"#cbd5e1"}`,background:fd.riskFlag?"#be123c":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:"0",fontSize:"10px",color:"#fff",fontWeight:"900"}},fd.riskFlag?"✓":"");
+  riskBox.appendChild(chkDiv);
+  const rt=el("div",{});rt.appendChild(el("div",{style:{fontSize:"12px",fontWeight:"700",color:fd.riskFlag?"#be123c":"#64748b"}},"Flag as high-risk case"));rt.appendChild(el("div",{style:{fontSize:"11px",color:"#94a3b8"}},"Shows prominent risk badge on card"));
+  riskBox.appendChild(rt);
+  riskBox.addEventListener("click",()=>{fd.riskFlag=!fd.riskFlag;state.formData=fd;refreshForm(wrap);});
+  wrap.appendChild(riskBox);
+
+  // Clinical
+  wrap.appendChild(secHead("🩺","Clinical Details","#0ea5e9"));
+  wrap.appendChild(fw("Diagnosis / Presenting Problem",true,inp("e.g. GAD (F41.1)",fd.diagnosis,"diagnosis")));
+  wrap.appendChild(fw("Presenting Issue",false,ta("Brief summary…",fd.presenting,"presenting")));
+  wrap.appendChild(fw("Key Clinical Notes",false,ta("History, risk, treatment…",fd.clinicalNotes,"clinicalNotes",4)));
+  wrap.appendChild(fw("Discussion Points / Questions",false,ta("What to discuss?",fd.discussionPoints,"discussionPoints")));
+
+  // Follow-up
+  wrap.appendChild(secHead("📋","Follow-up","#10b981"));
+  const g2=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 10px"}});
+  const fudWrap=el("div",{className:"field-wrap"});
+  fudWrap.appendChild(lbl("Follow-up Date",false));
+  fudWrap.appendChild(inp("",fd.followUpDate,"followUpDate","date"));
+  const qdRow=el("div",{style:{display:"flex",gap:"4px",marginTop:"5px",marginBottom:"4px"}});
+  [["1w",7],["2w",14],["1m",30],["3m",90]].forEach(([l,d])=>{
+    const b=el("button",{style:{flex:"1",padding:"3px 0",borderRadius:"5px",border:"1px solid #e2e8f0",background:"#f1f5f9",color:"#64748b",fontSize:"10px",fontWeight:"700"}},`+${l}`);
+    b.addEventListener("click",()=>{fd.followUpDate=quickDate(d);state.formData=fd;refreshForm(wrap);});
+    qdRow.appendChild(b);
+  });
+  fudWrap.appendChild(qdRow);
+  g2.appendChild(fudWrap);
+  g2.appendChild(fw("Follow-up Status",false,selEl(FOLLOWUP_STATUS,fd.followUpStatus,"followUpStatus")));
+  wrap.appendChild(g2);
+  wrap.appendChild(fw("Follow-up Notes",false,ta("Outcomes, next steps…",fd.followUpNotes,"followUpNotes",2)));
+
+  // Session notes
+  wrap.appendChild(secHead("🗒️","Session Notes Log","#0369a1"));
+  wrap.appendChild(el("p",{style:{fontSize:"11px",color:"#94a3b8",marginBottom:"8px",marginTop:"-4px"}},"Timestamped notes — nothing is overwritten."));
+  wrap.appendChild(renderSessionLog(fd,wrap));
+
+  // Tags & complexity
+  wrap.appendChild(secHead("🏷️","Category & Complexity","#8b5cf6"));
+  wrap.appendChild(lbl("Purpose / Category",false));
+  const tagBtns=el("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom:"12px"}});
+  TAGS.forEach(tag=>{
+    const sel2=fd.tags&&fd.tags.includes(tag);const tc=TAG_COLORS[tag];
+    const b=el("button",{style:{padding:"4px 10px",borderRadius:"20px",fontSize:"11px",fontWeight:"700",background:sel2?tc.bg:"#f1f5f9",color:sel2?tc.text:"#94a3b8",border:sel2?`1.5px solid ${tc.border}`:"1.5px solid #e2e8f0"}},tag);
+    b.addEventListener("click",()=>{fd.tags=fd.tags&&fd.tags.includes(tag)?fd.tags.filter(x=>x!==tag):[...(fd.tags||[]),tag];state.formData=fd;refreshForm(wrap);});
+    tagBtns.appendChild(b);
+  });
+  wrap.appendChild(tagBtns);
+  wrap.appendChild(lbl("Case Complexity",false));
+  const cxBtns=el("div",{style:{display:"flex",gap:"6px",marginBottom:"14px"}});
+  COMPLEXITY.forEach(c=>{
+    const sel2=fd.complexity===c;const cc=COMPLEXITY_COLORS[c];
+    const b=el("button",{style:{flex:"1",padding:"6px 0",borderRadius:"7px",fontSize:"11px",fontWeight:"700",background:sel2?cc.bg:"#f1f5f9",color:sel2?cc.text:"#94a3b8",border:sel2?`1.5px solid ${cc.dot}`:"1.5px solid #e2e8f0"}},c);
+    b.addEventListener("click",()=>{fd.complexity=fd.complexity===c?"":c;state.formData=fd;refreshForm(wrap);});
+    cxBtns.appendChild(b);
+  });
+  wrap.appendChild(cxBtns);
+
+  // Actions
+  const actRow=el("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"16px",paddingTop:"14px",borderTop:"1px solid #f1f5f9"}});
+  const cancelBtn=el("button",{style:{padding:"9px 18px",borderRadius:"7px",border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:"13px",fontWeight:"600"}},"Cancel");
+  cancelBtn.addEventListener("click",()=>{state.view="list";render();});
+  const saveBtn=el("button",{style:{padding:"9px 22px",borderRadius:"7px",border:"none",background:"linear-gradient(135deg,#0ea5e9,#6366f1)",color:"#fff",fontSize:"13px",fontWeight:"700"}},state.editing?"Save Changes":"Add Case");
+  saveBtn.addEventListener("click",()=>{
+    if(!fd.name||!fd.name.trim()){showToast("Please enter a name or identifier.","error");return;}
+    if(state.editing){state.patients=state.patients.map(p=>p.id===state.editing?{...fd,id:state.editing}:p);}
+    else{state.patients=[...state.patients,{...fd,id:Date.now()}];}
+    saveLocal();syncToSheets();
+    state.view="list";state.editing=null;state.formData=null;render();
+  });
+  actRow.appendChild(cancelBtn);
+  actRow.appendChild(saveBtn);
+  wrap.appendChild(actRow);
+  return wrap;
+}
+
+function refreshForm(wrap) {
+  const modal = wrap.closest(".modal");
+  if (modal) { modal.innerHTML=""; modal.appendChild(renderForm()); }
+}
+
+function renderSessionLog(fd, formWrap) {
+  const notes=fd.sessionNotes||[];
+  const logWrap=el("div",{style:{marginBottom:"12px"}});
+  notes.forEach(n=>{
+    const note=el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"7px",padding:"8px 10px",marginBottom:"6px",position:"relative"}});
+    note.appendChild(el("div",{style:{fontSize:"10px",color:"#94a3b8",marginBottom:"3px"}},new Date(n.timestamp).toLocaleString("en-GB",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})));
+    note.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",lineHeight:"1.6",paddingRight:"18px",whiteSpace:"pre-wrap"}},n.text));
+    const d2=el("button",{style:{position:"absolute",top:"6px",right:"7px",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:"14px",lineHeight:"1"}},"×");
+    d2.addEventListener("click",()=>{fd.sessionNotes=notes.filter(x=>x.id!==n.id);state.formData=fd;refreshForm(formWrap);});
+    note.appendChild(d2);
+    logWrap.appendChild(note);
+  });
+  const addRow=el("div",{style:{display:"flex",gap:"7px"}});
+  const ta2=el("textarea",{placeholder:"Add timestamped note…",rows:"2",style:{flex:"1",padding:"8px 10px",borderRadius:"7px",border:"1.5px solid #e2e8f0",fontSize:"12px",fontFamily:"inherit",outline:"none",resize:"vertical",background:"#f8fafc"}});
+  ta2.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});
+  ta2.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});
+  const addBtn=el("button",{style:{alignSelf:"flex-end",padding:"8px 12px",borderRadius:"7px",border:"none",background:"#0ea5e9",color:"#fff",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"+ Add");
+  addBtn.addEventListener("click",()=>{
+    const t=ta2.value.trim();if(!t)return;
+    fd.sessionNotes=[...(fd.sessionNotes||[]),{id:Date.now(),text:t,timestamp:new Date().toISOString()}];
+    state.formData=fd;refreshForm(formWrap);
+  });
+  addRow.appendChild(ta2);addRow.appendChild(addBtn);
+  logWrap.appendChild(addRow);
+  return logWrap;
+}
+
+// ── Detail view ────────────────────────────────────────────────────────────
+function renderDetail() {
+  const p=state.patients.find(x=>x.id===state.viewing.id)||state.viewing;
+  const od=isOverdue(p);
+  const wrap=el("div",{style:{padding:"20px 22px 24px"}});
+
+  const hdr=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"14px"}});
+  const titleWrap=el("div",{});
+  const nr=el("div",{style:{display:"flex",alignItems:"center",gap:"7px",flexWrap:"wrap"}});
+  nr.appendChild(el("h2",{style:{fontSize:"20px",fontWeight:"700",color:"#0f172a",margin:"0"}},p.name));
+  if(p.riskFlag)nr.appendChild(el("span",{className:"badge",style:{background:"#fff1f2",color:"#be123c",border:"1.5px solid #fda4af",fontSize:"10px"}},"⚠ RISK"));
+  titleWrap.appendChild(nr);
+  if(p.nameNote)titleWrap.appendChild(el("div",{style:{fontSize:"11px",color:"#b0bec5"}},p.nameNote));
+  const meta=[p.age&&`Age ${p.age}`,p.gender].filter(Boolean).join(" · ");
+  if(meta)titleWrap.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginTop:"2px"}},meta));
+  hdr.appendChild(titleWrap);
+
+  const btnRow=el("div",{style:{display:"flex",gap:"7px",alignItems:"center",flexShrink:"0"}});
+  const delBtn=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"🗑 Delete");
+  delBtn.addEventListener("click",()=>{state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();state.view="list";state.viewing=null;render();});
+  btnRow.appendChild(delBtn);
+  const editBtn=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #0ea5e9",background:"#fff",color:"#0ea5e9",fontSize:"12px",fontWeight:"600",cursor:"pointer"}},"Edit");
+  editBtn.addEventListener("click",()=>{state.formData={...p,sessionNotes:[...(p.sessionNotes||[])]};state.editing=p.id;state.view="form";render();});
+  btnRow.appendChild(editBtn);
+  const closeBtn=el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",cursor:"pointer",lineHeight:"1"}},"×");
+  closeBtn.addEventListener("click",()=>{state.view="list";state.viewing=null;render();});
+  btnRow.appendChild(closeBtn);
+  hdr.appendChild(btnRow);
+  wrap.appendChild(hdr);
+
+  const tagRow2=el("div",{style:{display:"flex",flexWrap:"wrap",gap:"5px",marginBottom:"14px"}});
+  (p.tags||[]).forEach(t=>{const tc=TAG_COLORS[t];if(tc)tagRow2.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},t));});
+  if(p.complexity){const cc=COMPLEXITY_COLORS[p.complexity];tagRow2.appendChild(el("span",{style:{display:"inline-flex",alignItems:"center",gap:"3px",fontSize:"10px",fontWeight:"700",color:cc.text,background:cc.bg,padding:"2px 8px",borderRadius:"5px"}},`● ${p.complexity}`));}
+  wrap.appendChild(tagRow2);
+
+  function sec(icon,title,content){if(!content)return;const d=el("div",{style:{marginBottom:"14px"}});d.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#94a3b8",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"4px"}},`${icon} ${title}`));d.appendChild(el("div",{style:{fontSize:"13px",color:"#334155",lineHeight:"1.75",whiteSpace:"pre-wrap"}},content));wrap.appendChild(d);}
+  sec("🩺","Diagnosis / Presenting Problem",p.diagnosis);
+  sec("📝","Presenting Issue",p.presenting);
+  sec("🗒️","Key Clinical Notes",p.clinicalNotes);
+  sec("💬","Discussion Points",p.discussionPoints);
+
+  if(p.followUpDate||p.followUpStatus||p.followUpNotes){
+    const fuBox=el("div",{style:{background:od?"#fff5f5":"#f0fdf4",border:`1px solid ${od?"#fca5a5":"#bbf7d0"}`,borderRadius:"9px",padding:"12px 14px",marginBottom:"14px"}});
+    fuBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:od?"#dc2626":"#16a34a",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"7px"}},`📋 Follow-up${od?" — OVERDUE":""}`));
+    const fr2=el("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginBottom:p.followUpNotes?"7px":"0",flexWrap:"wrap"}});
+    if(p.followUpStatus){const fc=FOLLOWUP_COLORS[p.followUpStatus];fr2.appendChild(el("span",{className:"badge",style:{background:fc.bg,color:fc.text,border:`1.5px solid ${fc.border}`}},`↻ ${p.followUpStatus}`));}
+    if(p.followUpDate)fr2.appendChild(el("span",{style:{fontSize:"12px",color:"#475569"}},fmtDate(p.followUpDate,true)));
+    fuBox.appendChild(fr2);
+    if(p.followUpNotes)fuBox.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",lineHeight:"1.7",whiteSpace:"pre-wrap",marginTop:"6px"}},p.followUpNotes));
+    wrap.appendChild(fuBox);
+  }
+
+  // Session notes
+  wrap.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#94a3b8",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"8px"}},"🗒️ Session Notes Log"));
+  const snWrap=el("div",{style:{marginBottom:"14px"}});
+  (p.sessionNotes||[]).forEach(n=>{
+    const note=el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"7px",padding:"8px 10px",marginBottom:"6px",position:"relative"}});
+    note.appendChild(el("div",{style:{fontSize:"10px",color:"#94a3b8",marginBottom:"3px"}},new Date(n.timestamp).toLocaleString("en-GB",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})));
+    note.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",lineHeight:"1.6",paddingRight:"18px",whiteSpace:"pre-wrap"}},n.text));
+    const d3=el("button",{style:{position:"absolute",top:"6px",right:"7px",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:"14px",lineHeight:"1"}},"×");
+    d3.addEventListener("click",()=>{
+      const updated=state.patients.map(x=>x.id===p.id?{...x,sessionNotes:(x.sessionNotes||[]).filter(s=>s.id!==n.id)}:x);
+      state.patients=updated;saveLocal();syncToSheets();
+      state.viewing=updated.find(x=>x.id===p.id);render();
+    });
+    note.appendChild(d3);
+    snWrap.appendChild(note);
+  });
+  const addRow2=el("div",{style:{display:"flex",gap:"7px"}});
+  const ta3=el("textarea",{placeholder:"Add timestamped note…",rows:"2",style:{flex:"1",padding:"8px 10px",borderRadius:"7px",border:"1.5px solid #e2e8f0",fontSize:"12px",fontFamily:"inherit",outline:"none",resize:"vertical",background:"#f8fafc"}});
+  ta3.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});
+  ta3.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});
+  const addBtn3=el("button",{style:{alignSelf:"flex-end",padding:"8px 12px",borderRadius:"7px",border:"none",background:"#0ea5e9",color:"#fff",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"+ Add");
+  addBtn3.addEventListener("click",()=>{
+    const t=ta3.value.trim();if(!t)return;
+    const newNote={id:Date.now(),text:t,timestamp:new Date().toISOString()};
+    const updated=state.patients.map(x=>x.id===p.id?{...x,sessionNotes:[...(x.sessionNotes||[]),newNote]}:x);
+    state.patients=updated;saveLocal();syncToSheets();
+    state.viewing=updated.find(x=>x.id===p.id);render();
+  });
+  addRow2.appendChild(ta3);addRow2.appendChild(addBtn3);
+  snWrap.appendChild(addRow2);
+  wrap.appendChild(snWrap);
+  wrap.appendChild(el("div",{style:{fontSize:"10px",color:"#cbd5e1"}},`Added ${fmtDate(p.dateAdded,true)}`));
+  return wrap;
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadLocal();
+if (state.password) { state.authed = true; syncFromSheets(); } else { render(); }
+</script>
+</body>
+</html>
