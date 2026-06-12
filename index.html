@@ -258,29 +258,44 @@ function renderHeader() {
 
 function renderFilterBar() {
   const bar = el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}});
-  const row = el("div",{style:{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}});
 
+  // Search row
+  const searchRow = el("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginBottom:"8px"}});
   const searchInput = el("input",{type:"text",placeholder:"Search cases…",value:state.search||"",style:{flex:"1",minWidth:"120px",padding:"6px 10px",fontSize:"12px"}});
   searchInput.addEventListener("input",e=>{state.search=e.target.value;render();});
-  row.appendChild(searchInput);
+  searchRow.appendChild(searchInput);
 
-  const tagRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
-  ["All",...TAGS].forEach(tag=>{
-    const active=(state.filterTag||"All")===tag;
-    const count=tag==="All"?state.patients.length:state.patients.filter(p=>p.tags&&p.tags.includes(tag)).length;
-    const b=el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?"#1e3a8a":"#f1f5f9",color:active?"#fff":"#64748b",border:active?"1.5px solid #1e3a8a":"1.5px solid #e2e8f0"},onClick:()=>{state.filterTag=tag;render();}},`${tag} (${count})`);
-    tagRow.appendChild(b);
-  });
-  row.appendChild(tagRow);
-
+  // Sort options — vary based on active tag
   const sortSel = el("select",{style:{padding:"5px 8px",fontSize:"11px",color:"#64748b",background:"#f8fafc",width:"auto"},onChange:e=>{state.sortBy=e.target.value;render();}});
-  [["dateAdded","Date Added"],["followUpDate","Follow-up"],["complexity","Complexity"],["name","Name"]].forEach(([v,l])=>{
+  const sortOptions = [
+    ["dateAdded_desc","Date Added (newest first)"],
+    ["dateAdded_asc","Date Added (oldest first)"],
+    ["followUpDate","Follow-up Date"],
+  ];
+  sortOptions.forEach(([v,l])=>{
     const o=el("option",{value:v},l);
     if(state.sortBy===v)o.selected=true;
     sortSel.appendChild(o);
   });
-  row.appendChild(sortSel);
-  bar.appendChild(row);
+  searchRow.appendChild(sortSel);
+  bar.appendChild(searchRow);
+
+  // Tag filter row
+  const tagRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
+  ["All",...TAGS].forEach(tag=>{
+    const active=(state.filterTag||"All")===tag;
+    const count=tag==="All"?state.patients.length:state.patients.filter(p=>p.tags&&p.tags.includes(tag)).length;
+    const tc=TAG_COLORS[tag];
+    const b=el("button",{
+      style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",
+        background:active?(tc?"#1e3a8a":"#1e3a8a"):"#f1f5f9",
+        color:active?"#fff":"#64748b",
+        border:active?"1.5px solid #1e3a8a":"1.5px solid #e2e8f0"},
+      onClick:()=>{state.filterTag=tag;render();}
+    },`${tag} (${count})`);
+    tagRow.appendChild(b);
+  });
+  bar.appendChild(tagRow);
   return bar;
 }
 
@@ -293,13 +308,11 @@ function renderList() {
     const q=state.search.toLowerCase();
     list=list.filter(p=>p.name.toLowerCase().includes(q)||(p.diagnosis||"").toLowerCase().includes(q)||(p.discussionPoints||"").toLowerCase().includes(q));
   }
-  const sortFns = {
-    dateAdded:(a,b)=>new Date(b.dateAdded)-new Date(a.dateAdded),
-    followUpDate:(a,b)=>{if(!a.followUpDate)return 1;if(!b.followUpDate)return -1;return new Date(a.followUpDate)-new Date(b.followUpDate);},
-    complexity:(a,b)=>COMPLEXITY.indexOf(b.complexity)-COMPLEXITY.indexOf(a.complexity),
-    name:(a,b)=>a.name.localeCompare(b.name)
-  };
-  list.sort(sortFns[state.sortBy||"dateAdded"]);
+
+  const sortBy = state.sortBy||"dateAdded_desc";
+  if (sortBy==="dateAdded_desc") list.sort((a,b)=>new Date(b.dateAdded)-new Date(a.dateAdded));
+  else if (sortBy==="dateAdded_asc") list.sort((a,b)=>new Date(a.dateAdded)-new Date(b.dateAdded));
+  else if (sortBy==="followUpDate") list.sort((a,b)=>{if(!a.followUpDate)return 1;if(!b.followUpDate)return -1;return new Date(a.followUpDate)-new Date(b.followUpDate);});
 
   if (list.length===0) {
     const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});
@@ -310,25 +323,20 @@ function renderList() {
     return wrap;
   }
 
-  const groups={};
-  TAGS.forEach(t=>{const c=list.filter(p=>p.tags&&p.tags.includes(t));if(c.length)groups[t]=c;});
-  const untagged=list.filter(p=>!p.tags||!p.tags.length);
-  if(untagged.length)groups["Untagged"]=untagged;
+  // Flat list — no group headers
+  const countBar = el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"12px"}});
+  const activeTag = ft!=="All" ? ft : null;
+  if (activeTag) {
+    const tc=TAG_COLORS[activeTag];
+    countBar.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},activeTag));
+  }
+  countBar.appendChild(el("span",{style:{fontSize:"12px",color:"#94a3b8"}},`${list.length} case${list.length!==1?"s":""}`));
+  countBar.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
+  wrap.appendChild(countBar);
 
-  Object.entries(groups).forEach(([group,cases])=>{
-    const gw=el("div",{style:{marginBottom:"22px"}});
-    const gh=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"10px"}});
-    const tc=TAG_COLORS[group];
-    if(tc){gh.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},group));}
-    else{gh.appendChild(el("span",{style:{fontSize:"13px",fontWeight:"700",color:"#1e293b"}},group));}
-    gh.appendChild(el("span",{style:{fontSize:"11px",color:"#94a3b8"}},`${cases.length} case${cases.length!==1?"s":""}`));
-    gh.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
-    gw.appendChild(gh);
-    const grid=el("div",{className:"grid"});
-    cases.forEach(p=>grid.appendChild(renderCard(p)));
-    gw.appendChild(grid);
-    wrap.appendChild(gw);
-  });
+  const grid=el("div",{className:"grid"});
+  list.forEach(p=>grid.appendChild(renderCard(p)));
+  wrap.appendChild(grid);
   return wrap;
 }
 
