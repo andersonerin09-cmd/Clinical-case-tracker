@@ -272,6 +272,7 @@ function renderFilterBar() {
     ["dateAdded_desc","Date Added (newest first)"],
     ["dateAdded_asc","Date Added (oldest first)"],
     ["followUpDate","Follow-up Date"],
+    ["name","Name (A–Z)"],
   ];
   sortOptions.forEach(([v,l])=>{
     const o=el("option",{value:v},l);
@@ -283,17 +284,18 @@ function renderFilterBar() {
 
   // Tag filter row
   const tagRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
-  ["All",...TAGS].forEach(tag=>{
+  const overdueCount = state.patients.filter(isOverdue).length;
+  ["All",...TAGS,"Overdue"].forEach(tag=>{
     const active=(state.filterTag||"All")===tag;
-    const count=tag==="All"?state.patients.length:state.patients.filter(p=>p.tags&&p.tags.includes(tag)).length;
-    const tc=TAG_COLORS[tag];
+    const isOverdueBtn = tag==="Overdue";
+    const count = tag==="All" ? state.patients.length : isOverdueBtn ? overdueCount : state.patients.filter(p=>p.tags&&p.tags.includes(tag)).length;
     const b=el("button",{
       style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",
-        background:active?(tc?"#1e3a8a":"#1e3a8a"):"#f1f5f9",
+        background:active?(isOverdueBtn?"#dc2626":"#1e3a8a"):"#f1f5f9",
         color:active?"#fff":"#64748b",
-        border:active?"1.5px solid #1e3a8a":"1.5px solid #e2e8f0"},
+        border:active?(isOverdueBtn?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},
       onClick:()=>{state.filterTag=tag;render();}
-    },`${tag} (${count})`);
+    },`${isOverdueBtn?"🔴 ":""}${tag} (${count})`);
     tagRow.appendChild(b);
   });
   bar.appendChild(tagRow);
@@ -304,7 +306,8 @@ function renderList() {
   const wrap = el("div",{style:{padding:"16px 16px 100px"}});
   let list = [...state.patients];
   const ft = state.filterTag||"All";
-  if (ft!=="All") list=list.filter(p=>p.tags&&p.tags.includes(ft));
+  if (ft==="Overdue") list=list.filter(isOverdue);
+  else if (ft!=="All") list=list.filter(p=>p.tags&&p.tags.includes(ft));
   if (state.search&&state.search.trim()) {
     const q=state.search.toLowerCase();
     list=list.filter(p=>p.name.toLowerCase().includes(q)||(p.diagnosis||"").toLowerCase().includes(q)||(p.discussionPoints||"").toLowerCase().includes(q));
@@ -314,6 +317,7 @@ function renderList() {
   if (sortBy==="dateAdded_desc") list.sort((a,b)=>new Date(b.dateAdded)-new Date(a.dateAdded));
   else if (sortBy==="dateAdded_asc") list.sort((a,b)=>new Date(a.dateAdded)-new Date(b.dateAdded));
   else if (sortBy==="followUpDate") list.sort((a,b)=>{if(!a.followUpDate)return 1;if(!b.followUpDate)return -1;return new Date(a.followUpDate)-new Date(b.followUpDate);});
+  else if (sortBy==="name") list.sort((a,b)=>a.name.localeCompare(b.name));
 
   if (list.length===0) {
     const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});
@@ -328,8 +332,12 @@ function renderList() {
   const countBar = el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"12px"}});
   const activeTag = ft!=="All" ? ft : null;
   if (activeTag) {
-    const tc=TAG_COLORS[activeTag];
-    countBar.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},activeTag));
+    if (activeTag==="Overdue") {
+      countBar.appendChild(el("span",{className:"badge",style:{background:"#fee2e2",color:"#dc2626",border:"1.5px solid #fca5a5"}},"🔴 Overdue"));
+    } else {
+      const tc=TAG_COLORS[activeTag];
+      if (tc) countBar.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},activeTag));
+    }
   }
   countBar.appendChild(el("span",{style:{fontSize:"12px",color:"#94a3b8"}},`${list.length} case${list.length!==1?"s":""}`));
   countBar.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
