@@ -524,7 +524,7 @@ function renderCard(p) {
   }
   if(p.followUpStatus||p.followUpDate){
     const fr=el("div",{style:{display:"flex",alignItems:"center",gap:"5px",marginBottom:"7px",flexWrap:"wrap"}});
-    if(p.followUpStatus){const fc=FOLLOWUP_COLORS[p.followUpStatus];fr.appendChild(el("span",{className:"badge",style:{background:fc.bg,color:fc.text,border:`1.5px solid ${fc.border}`}},`↻ ${p.followUpStatus}`));}
+    if(p.followUpStatus){const fc=FOLLOWUP_COLORS[p.followUpStatus];if(fc)fr.appendChild(el("span",{className:"badge",style:{background:fc.bg,color:fc.text,border:`1.5px solid ${fc.border}`}},`↻ ${p.followUpStatus}`));}
     if(p.followUpDate)fr.appendChild(el("span",{style:{fontSize:"10px",color:"#94a3b8"}},fmtDate(p.followUpDate)));
     card.appendChild(fr);
   }
@@ -936,7 +936,7 @@ function renderDetail() {
     const fuBox=el("div",{style:{background:od?"#fff5f5":"#f0fdf4",border:`1px solid ${od?"#fca5a5":"#bbf7d0"}`,borderRadius:"9px",padding:"12px 14px",marginBottom:"14px"}});
     fuBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:od?"#dc2626":"#16a34a",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"7px"}},`📋 Follow-up${od?" — OVERDUE":""}`));
     const fr2=el("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginBottom:p.followUpNotes?"7px":"0",flexWrap:"wrap"}});
-    if(p.followUpStatus){const fc=FOLLOWUP_COLORS[p.followUpStatus];fr2.appendChild(el("span",{className:"badge",style:{background:fc.bg,color:fc.text,border:`1.5px solid ${fc.border}`}},`↻ ${p.followUpStatus}`));}
+    if(p.followUpStatus){const fc=FOLLOWUP_COLORS[p.followUpStatus];if(fc)fr2.appendChild(el("span",{className:"badge",style:{background:fc.bg,color:fc.text,border:`1.5px solid ${fc.border}`}},`↻ ${p.followUpStatus}`));}
     if(p.followUpDate)fr2.appendChild(el("span",{style:{fontSize:"12px",color:"#475569"}},fmtDate(p.followUpDate,true)));
     fuBox.appendChild(fr2);
     if(p.followUpNotes)fuBox.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",lineHeight:"1.7",whiteSpace:"pre-wrap",marginTop:"6px"}},p.followUpNotes));
