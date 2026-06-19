@@ -33,15 +33,13 @@
 </style>
 </head>
 <body>
-
 <div id="root"></div>
-
 <script>
 // ── Config ─────────────────────────────────────────────────────────────────
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbydaqBZ1iTMTkk6cWB_ZEUN1I4q7qkGwEHArvGXlCjkC70ue90-mKad7S9EenicKyaa/exec";
-const APP_VERSION = "1.0";
+const APP_VERSION = "1.1";
 
-// ── Constants ──────────────────────────────────────────────────────────────
+// ── Cases Constants ────────────────────────────────────────────────────────
 const TAGS = ["Supervision","Meeting","Conference","Peer Review","MDT","Order Test","Needs Letter","Research"];
 const TAG_COLORS = {
   "Supervision":  {bg:"#EEF2FF",text:"#4338ca",border:"#c7d2fe"},
@@ -68,11 +66,31 @@ const FOLLOWUP_COLORS = {
   "Ongoing":  {bg:"#fdf4ff",text:"#7e22ce",border:"#e9d5ff"}
 };
 
+// ── Test Orders Constants ──────────────────────────────────────────────────
+const TEST_STATUSES = ["Consent Sent","Consent Received","Order Finalised","Results Due","Complete"];
+const TEST_STATUS_COLORS = {
+  "Consent Sent":     {bg:"#fffbeb",text:"#92400e",border:"#fde68a"},
+  "Consent Received": {bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"},
+  "Order Finalised":  {bg:"#f0fdf4",text:"#15803d",border:"#bbf7d0"},
+  "Results Due":      {bg:"#fdf4ff",text:"#7e22ce",border:"#e9d5ff"},
+  "Complete":         {bg:"#f1f5f9",text:"#475569",border:"#cbd5e1"}
+};
+const STATUS_DATE_FIELD = {
+  "Consent Sent":     "dateConsentSent",
+  "Consent Received": "dateConsentReceived",
+  "Order Finalised":  "dateOrderFinalised",
+  "Results Due":      "dateResultsDue",
+  "Complete":         "dateComplete"
+};
+
 // ── State ──────────────────────────────────────────────────────────────────
 let state = {
   authed: false,
   password: "",
   patients: [],
+  testOrders: [],
+  activeTab: "cases",
+  // Cases view state
   view: "list",
   editing: null,
   viewing: null,
@@ -80,6 +98,14 @@ let state = {
   filterTag: "All",
   search: "",
   sortBy: "dateAdded",
+  // Test orders view state
+  viewTO: "list",
+  editingTO: null,
+  viewingTO: null,
+  formDataTO: null,
+  filterStatusTO: "All",
+  searchTO: "",
+  // Shared
   syncing: false,
   lastSync: null
 };
@@ -90,9 +116,19 @@ function isOverdue(p) {
   if (p.followUpStatus === "Done - nil further f'up" || p.followUpStatus === "Discussed") return false;
   return new Date(p.followUpDate) < new Date();
 }
+function isTestOrderOverdue(o) {
+  if (!o.resultsDueTarget) return false;
+  if (o.status === "Complete") return false;
+  if (o.status !== "Results Due") return false;
+  return new Date(o.resultsDueTarget) < new Date();
+}
 function emptyForm() {
   return {name:"",nameNote:"",age:"",gender:"",diagnosis:"",presenting:"",clinicalNotes:"",discussionPoints:"",followUpDate:"",followUpStatus:"Pending",followUpNotes:"",tags:[],complexity:"",riskFlag:false,dateAdded:new Date().toISOString().split("T")[0],sessionNotes:[]};
 }
+function emptyTestOrderForm() {
+  return {name:"",testRequired:"",status:"",dateConsentSent:"",dateConsentReceived:"",dateOrderFinalised:"",resultsDueTarget:"",dateResultsDue:"",dateComplete:"",dateEntered:new Date().toISOString().split("T")[0]};
+}
+function todayISO() { return new Date().toISOString().split("T")[0]; }
 function quickDate(days) {
   const d = new Date(); d.setDate(d.getDate()+days); return d.toISOString().split("T")[0];
 }
@@ -101,14 +137,20 @@ function fmtDate(str, long) {
   try { return new Date(str).toLocaleDateString("en-GB", long ? {day:"numeric",month:"long",year:"numeric"} : {day:"numeric",month:"short",year:"numeric"}); } catch { return str; }
 }
 function saveLocal() {
-  try { localStorage.setItem("cct_cases", JSON.stringify(state.patients)); localStorage.setItem("cct_pw", state.password); } catch {}
+  try {
+    localStorage.setItem("cct_cases", JSON.stringify(state.patients));
+    localStorage.setItem("cct_testorders", JSON.stringify(state.testOrders));
+    localStorage.setItem("cct_pw", state.password);
+  } catch {}
 }
 function loadLocal() {
   try {
     const pw = localStorage.getItem("cct_pw");
     const cases = localStorage.getItem("cct_cases");
+    const testOrders = localStorage.getItem("cct_testorders");
     if (pw) state.password = pw;
     if (cases) state.patients = JSON.parse(cases);
+    if (testOrders) state.testOrders = JSON.parse(testOrders);
   } catch {}
 }
 
@@ -119,7 +161,9 @@ async function syncFromSheets() {
     const res = await fetch(`${SCRIPT_URL}?password=${encodeURIComponent(state.password)}`);
     const data = await res.json();
     if (data.error === "Unauthorized") { state.authed = false; state.password = ""; render(); showToast("Incorrect password","error"); return; }
-    if (data.cases) { state.patients = data.cases; saveLocal(); }
+    if (data.cases) state.patients = data.cases;
+    if (data.testOrders) state.testOrders = data.testOrders;
+    saveLocal();
     state.lastSync = new Date();
     showToast("Synced with Google Sheets ✓","success");
   } catch(e) {
@@ -136,7 +180,23 @@ async function syncToSheets() {
       body: JSON.stringify({password: state.password, action: "save", cases: state.patients})
     });
     const data = await res.json();
-    if (data.error) { showToast("Save failed: " + data.error, "error"); }
+    if (data.error) showToast("Save failed: " + data.error, "error");
+    else { state.lastSync = new Date(); showToast("Saved to Google Sheets ✓","success"); }
+  } catch(e) {
+    showToast("Save failed — check connection","error");
+  }
+  state.syncing = false; render();
+}
+
+async function syncTestOrdersToSheets() {
+  state.syncing = true; render();
+  try {
+    const res = await fetch(SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({password: state.password, action: "saveTestOrders", testOrders: state.testOrders})
+    });
+    const data = await res.json();
+    if (data.error) showToast("Save failed: " + data.error, "error");
     else { state.lastSync = new Date(); showToast("Saved to Google Sheets ✓","success"); }
   } catch(e) {
     showToast("Save failed — check connection","error");
@@ -209,14 +269,44 @@ function renderLogin() {
 function renderMain() {
   const wrap = el("div",{style:{minHeight:"100vh",background:"#f0f6ff"}});
   wrap.appendChild(renderHeader());
-  wrap.appendChild(renderFilterBar());
-  wrap.appendChild(renderList());
-  if (state.view === "form") wrap.appendChild(renderOverlay(renderForm()));
-  if (state.view === "detail" && state.viewing) wrap.appendChild(renderOverlay(renderDetail()));
+  wrap.appendChild(renderTabBar());
+  if (state.activeTab === "cases") {
+    wrap.appendChild(renderFilterBar());
+    wrap.appendChild(renderList());
+    if (state.view === "form") wrap.appendChild(renderOverlay(renderForm()));
+    if (state.view === "detail" && state.viewing) wrap.appendChild(renderOverlay(renderDetail()));
+  } else {
+    wrap.appendChild(renderTestOrdersFilterBar());
+    wrap.appendChild(renderTestOrdersList());
+    if (state.viewTO === "form") wrap.appendChild(renderOverlay(renderTestOrderForm()));
+    if (state.viewTO === "detail" && state.viewingTO) wrap.appendChild(renderOverlay(renderTestOrderDetail()));
+  }
   return wrap;
 }
 
+// ── Tab Bar ────────────────────────────────────────────────────────────────
+function renderTabBar() {
+  const bar = el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"0 16px",display:"flex"}});
+  [["cases","📋 Cases"],["testOrders","🧬 Test Orders"]].forEach(([tab,label])=>{
+    const active = state.activeTab === tab;
+    const b = el("button",{style:{
+      padding:"11px 18px",border:"none",
+      borderBottom: active ? "2.5px solid #0ea5e9" : "2.5px solid transparent",
+      background:"none",color: active ? "#0ea5e9" : "#64748b",
+      fontSize:"13px",fontWeight: active ? "700" : "500",
+      cursor:"pointer",marginBottom:"-1px",transition:"color 0.15s"
+    },onClick:()=>{state.activeTab=tab;render();}},label);
+    bar.appendChild(b);
+  });
+  return bar;
+}
+
+// ── Header ─────────────────────────────────────────────────────────────────
 function renderHeader() {
+  return state.activeTab === "testOrders" ? renderTestOrdersHeader() : renderCasesHeader();
+}
+
+function renderCasesHeader() {
   const ps = state.patients;
   const overdueCount = ps.filter(isOverdue).length;
   const riskCount = ps.filter(p=>p.riskFlag).length;
@@ -228,15 +318,12 @@ function renderHeader() {
   const titleWrap = el("div",{});
   titleWrap.appendChild(el("h1",{style:{fontSize:"20px",fontWeight:"700",margin:"0 0 2px",color:"#fff"}},"Clinical Case Tracker"));
   titleWrap.appendChild(el("p",{style:{margin:"0",color:"#93c5fd",fontSize:"11px"}},"Supervision · Meetings · Conferences · MDT"));
-  const syncInfo = el("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.45)",marginTop:"3px"}}, state.lastSync ? `Last sync: ${state.lastSync.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}` : "Not yet synced");
-  titleWrap.appendChild(syncInfo);
+  titleWrap.appendChild(el("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.45)",marginTop:"3px"}}, state.lastSync ? `Last sync: ${state.lastSync.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}` : "Not yet synced"));
   top.appendChild(titleWrap);
 
   const btnWrap = el("div",{style:{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}});
-  const syncBtn = el("button",{style:{padding:"7px 14px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:"12px",fontWeight:"600"},onClick:syncFromSheets},state.syncing ? "⟳ Syncing…" : "⟳ Sync");
-  btnWrap.appendChild(syncBtn);
-  const newBtn = el("button",{style:{padding:"7px 16px",borderRadius:"8px",border:"none",background:"#fff",color:"#1e3a8a",fontSize:"13px",fontWeight:"700"},onClick:()=>{state.formData=emptyForm();state.editing=null;state.view="form";render();}},"+ New Case");
-  btnWrap.appendChild(newBtn);
+  btnWrap.appendChild(el("button",{style:{padding:"7px 14px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:"12px",fontWeight:"600"},onClick:syncFromSheets},state.syncing ? "⟳ Syncing…" : "⟳ Sync"));
+  btnWrap.appendChild(el("button",{style:{padding:"7px 16px",borderRadius:"8px",border:"none",background:"#fff",color:"#1e3a8a",fontSize:"13px",fontWeight:"700"},onClick:()=>{state.formData=emptyForm();state.editing=null;state.view="form";render();}},"+ New Case"));
   top.appendChild(btnWrap);
   hdr.appendChild(top);
 
@@ -257,51 +344,92 @@ function renderHeader() {
   return hdr;
 }
 
+function renderTestOrdersHeader() {
+  const orders = state.testOrders;
+  const overdueCount = orders.filter(isTestOrderOverdue).length;
+  const statusCounts = {};
+  TEST_STATUSES.forEach(s => statusCounts[s] = orders.filter(o=>o.status===s).length);
+
+  const hdr = el("div",{style:{background:"linear-gradient(135deg,#0c1445,#1e3a8a,#0369a1)",padding:"20px",color:"#fff"}});
+  const top = el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"10px",marginBottom:"14px"}});
+  const titleWrap = el("div",{});
+  titleWrap.appendChild(el("h1",{style:{fontSize:"20px",fontWeight:"700",margin:"0 0 2px",color:"#fff"}},"Clinical Case Tracker"));
+  titleWrap.appendChild(el("p",{style:{margin:"0",color:"#93c5fd",fontSize:"11px"}},"Genetic Test Order Pipeline"));
+  titleWrap.appendChild(el("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.45)",marginTop:"3px"}}, state.lastSync ? `Last sync: ${state.lastSync.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}` : "Not yet synced"));
+  top.appendChild(titleWrap);
+
+  const btnWrap = el("div",{style:{display:"flex",gap:"8px",alignItems:"center"}});
+  btnWrap.appendChild(el("button",{style:{padding:"7px 14px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:"12px",fontWeight:"600"},onClick:syncFromSheets},state.syncing ? "⟳ Syncing…" : "⟳ Sync"));
+  btnWrap.appendChild(el("button",{style:{padding:"7px 16px",borderRadius:"8px",border:"none",background:"#fff",color:"#1e3a8a",fontSize:"13px",fontWeight:"700"},onClick:()=>{state.formDataTO=emptyTestOrderForm();state.editingTO=null;state.viewTO="form";render();}},"+ New Order"));
+  top.appendChild(btnWrap);
+  hdr.appendChild(top);
+
+  const statsRow = el("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap"}});
+  const stats = [
+    {label:"Total",val:orders.length,icon:"🧬"},
+    ...TEST_STATUSES.map(s=>({label:s,val:statusCounts[s]||0})),
+    ...(overdueCount>0?[{label:"Overdue",val:overdueCount,icon:"🔴",warn:true}]:[])
+  ];
+  stats.forEach(s=>{
+    const chip=el("div",{style:{background:s.warn?"rgba(248,113,113,0.2)":"rgba(255,255,255,0.1)",borderRadius:"7px",padding:"5px 11px",border:s.warn?"1px solid rgba(248,113,113,0.4)":"none"}});
+    chip.appendChild(el("div",{style:{fontSize:"15px",fontWeight:"700",color:"#fff"}},`${s.icon||""} ${s.val}`));
+    chip.appendChild(el("div",{style:{fontSize:"9px",color:s.warn?"#fca5a5":"#93c5fd"}},s.label));
+    statsRow.appendChild(chip);
+  });
+  hdr.appendChild(statsRow);
+  return hdr;
+}
+
+// ── Cases Filter Bar ───────────────────────────────────────────────────────
 function renderFilterBar() {
   const bar = el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}});
-
-  // Search row
   const searchRow = el("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginBottom:"8px"}});
   const searchInput = el("input",{type:"text",placeholder:"Search cases…",value:state.search||"",style:{flex:"1",minWidth:"120px",padding:"6px 10px",fontSize:"12px"}});
   searchInput.addEventListener("input",e=>{state.search=e.target.value;render();});
   searchRow.appendChild(searchInput);
-
-  // Sort options — vary based on active tag
   const sortSel = el("select",{style:{padding:"5px 8px",fontSize:"11px",color:"#64748b",background:"#f8fafc",width:"auto"},onChange:e=>{state.sortBy=e.target.value;render();}});
-  const sortOptions = [
-    ["dateAdded_desc","Date Added (newest first)"],
-    ["dateAdded_asc","Date Added (oldest first)"],
-    ["followUpDate","Follow-up Date"],
-    ["name","Name (A–Z)"],
-  ];
-  sortOptions.forEach(([v,l])=>{
+  [["dateAdded_desc","Date Added (newest first)"],["dateAdded_asc","Date Added (oldest first)"],["followUpDate","Follow-up Date"],["name","Name (A–Z)"]].forEach(([v,l])=>{
     const o=el("option",{value:v},l);
     if(state.sortBy===v)o.selected=true;
     sortSel.appendChild(o);
   });
   searchRow.appendChild(sortSel);
   bar.appendChild(searchRow);
-
-  // Tag filter row
   const tagRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
   const overdueCount = state.patients.filter(isOverdue).length;
   ["All",...TAGS,"Overdue"].forEach(tag=>{
     const active=(state.filterTag||"All")===tag;
-    const isOverdueBtn = tag==="Overdue";
-    const count = tag==="All" ? state.patients.length : isOverdueBtn ? overdueCount : state.patients.filter(p=>p.tags&&p.tags.includes(tag)).length;
-    const b=el("button",{
-      style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",
-        background:active?(isOverdueBtn?"#dc2626":"#1e3a8a"):"#f1f5f9",
-        color:active?"#fff":"#64748b",
-        border:active?(isOverdueBtn?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},
-      onClick:()=>{state.filterTag=tag;render();}
-    },`${isOverdueBtn?"🔴 ":""}${tag} (${count})`);
+    const isOD=tag==="Overdue";
+    const count=tag==="All"?state.patients.length:isOD?overdueCount:state.patients.filter(p=>p.tags&&p.tags.includes(tag)).length;
+    const b=el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?(isOD?"#dc2626":"#1e3a8a"):"#f1f5f9",color:active?"#fff":"#64748b",border:active?(isOD?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},onClick:()=>{state.filterTag=tag;render();}},`${isOD?"🔴 ":""}${tag} (${count})`);
     tagRow.appendChild(b);
   });
   bar.appendChild(tagRow);
   return bar;
 }
 
+// ── Test Orders Filter Bar ─────────────────────────────────────────────────
+function renderTestOrdersFilterBar() {
+  const bar = el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}});
+  const searchRow = el("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginBottom:"8px"}});
+  const searchInput = el("input",{type:"text",placeholder:"Search orders…",value:state.searchTO||"",style:{flex:"1",minWidth:"120px",padding:"6px 10px",fontSize:"12px"}});
+  searchInput.addEventListener("input",e=>{state.searchTO=e.target.value;render();});
+  searchRow.appendChild(searchInput);
+  bar.appendChild(searchRow);
+  const statusRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
+  const overdueCount = state.testOrders.filter(isTestOrderOverdue).length;
+  ["All",...TEST_STATUSES,"Overdue"].forEach(status=>{
+    const active=(state.filterStatusTO||"All")===status;
+    const isOD=status==="Overdue";
+    const count=status==="All"?state.testOrders.length:isOD?overdueCount:state.testOrders.filter(o=>o.status===status).length;
+    const b=el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?(isOD?"#dc2626":"#1e3a8a"):"#f1f5f9",color:active?"#fff":"#64748b",border:active?(isOD?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},onClick:()=>{state.filterStatusTO=status;render();}},`${isOD?"🔴 ":""}${status} (${count})`);
+    statusRow.appendChild(b);
+  });
+  bar.appendChild(statusRow);
+  return bar;
+}
+
+// ── Cases List ─────────────────────────────────────────────────────────────
 function renderList() {
   const wrap = el("div",{style:{padding:"16px 16px 100px"}});
   let list = [...state.patients];
@@ -312,13 +440,11 @@ function renderList() {
     const q=state.search.toLowerCase();
     list=list.filter(p=>p.name.toLowerCase().includes(q)||(p.diagnosis||"").toLowerCase().includes(q)||(p.discussionPoints||"").toLowerCase().includes(q));
   }
-
   const sortBy = state.sortBy||"dateAdded_desc";
   if (sortBy==="dateAdded_desc") list.sort((a,b)=>new Date(b.dateAdded)-new Date(a.dateAdded));
   else if (sortBy==="dateAdded_asc") list.sort((a,b)=>new Date(a.dateAdded)-new Date(b.dateAdded));
   else if (sortBy==="followUpDate") list.sort((a,b)=>{if(!a.followUpDate)return 1;if(!b.followUpDate)return -1;return new Date(a.followUpDate)-new Date(b.followUpDate);});
   else if (sortBy==="name") list.sort((a,b)=>a.name.localeCompare(b.name));
-
   if (list.length===0) {
     const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});
     empty.appendChild(el("div",{style:{fontSize:"40px",marginBottom:"10px"}},"🩺"));
@@ -327,33 +453,60 @@ function renderList() {
     wrap.appendChild(empty);
     return wrap;
   }
-
-  // Flat list — no group headers
   const countBar = el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"12px"}});
   const activeTag = ft!=="All" ? ft : null;
   if (activeTag) {
-    if (activeTag==="Overdue") {
-      countBar.appendChild(el("span",{className:"badge",style:{background:"#fee2e2",color:"#dc2626",border:"1.5px solid #fca5a5"}},"🔴 Overdue"));
-    } else {
-      const tc=TAG_COLORS[activeTag];
-      if (tc) countBar.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},activeTag));
-    }
+    if (activeTag==="Overdue") countBar.appendChild(el("span",{className:"badge",style:{background:"#fee2e2",color:"#dc2626",border:"1.5px solid #fca5a5"}},"🔴 Overdue"));
+    else { const tc=TAG_COLORS[activeTag]; if (tc) countBar.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},activeTag)); }
   }
   countBar.appendChild(el("span",{style:{fontSize:"12px",color:"#94a3b8"}},`${list.length} case${list.length!==1?"s":""}`));
   countBar.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
   wrap.appendChild(countBar);
-
   const grid=el("div",{className:"grid"});
   list.forEach(p=>grid.appendChild(renderCard(p)));
   wrap.appendChild(grid);
   return wrap;
 }
 
+// ── Test Orders List ───────────────────────────────────────────────────────
+function renderTestOrdersList() {
+  const wrap = el("div",{style:{padding:"16px 16px 100px"}});
+  let list = [...state.testOrders];
+  const ft = state.filterStatusTO||"All";
+  if (ft==="Overdue") list=list.filter(isTestOrderOverdue);
+  else if (ft!=="All") list=list.filter(o=>o.status===ft);
+  if (state.searchTO&&state.searchTO.trim()) {
+    const q=state.searchTO.toLowerCase();
+    list=list.filter(o=>(o.name||"").toLowerCase().includes(q)||(o.testRequired||"").toLowerCase().includes(q));
+  }
+  // Incomplete first, then by dateEntered desc
+  list.sort((a,b)=>{
+    if(a.status==="Complete"&&b.status!=="Complete")return 1;
+    if(a.status!=="Complete"&&b.status==="Complete")return -1;
+    return new Date(b.dateEntered||0)-new Date(a.dateEntered||0);
+  });
+  if (list.length===0) {
+    const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});
+    empty.appendChild(el("div",{style:{fontSize:"40px",marginBottom:"10px"}},"🧬"));
+    empty.appendChild(el("div",{style:{fontSize:"16px",fontWeight:"600",color:"#475569",marginBottom:"5px"}},"No test orders found"));
+    empty.appendChild(el("div",{style:{fontSize:"12px"}},"Add a new order or adjust your filters."));
+    wrap.appendChild(empty);
+    return wrap;
+  }
+  const countBar=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"12px"}});
+  countBar.appendChild(el("span",{style:{fontSize:"12px",color:"#94a3b8"}},`${list.length} order${list.length!==1?"s":""}`));
+  countBar.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
+  wrap.appendChild(countBar);
+  const grid=el("div",{className:"grid"});
+  list.forEach(o=>grid.appendChild(renderTestOrderCard(o)));
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+// ── Case Card ──────────────────────────────────────────────────────────────
 function renderCard(p) {
   const od=isOverdue(p);
   const card=el("div",{className:"card",style:{border:od?"1.5px solid #fca5a5":p.riskFlag?"1.5px solid #fda4af":"1.5px solid #e2e8f0"},onClick:()=>{state.viewing=p;state.view="detail";render();}});
-
-  // Name row
   const nr=el("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap",marginBottom:"2px",paddingRight:"20px"}});
   nr.appendChild(el("span",{style:{fontSize:"15px",fontWeight:"700",color:"#0f172a"}},p.name));
   if(p.riskFlag)nr.appendChild(el("span",{className:"badge",style:{background:"#fff1f2",color:"#be123c",border:"1.5px solid #fda4af",fontSize:"10px"}},"⚠ RISK"));
@@ -381,7 +534,6 @@ function renderCard(p) {
   tagRow.appendChild(tagsWrap);
   if(p.complexity){const cc=COMPLEXITY_COLORS[p.complexity];tagRow.appendChild(el("span",{style:{display:"inline-flex",alignItems:"center",gap:"3px",fontSize:"10px",fontWeight:"700",color:cc.text,background:cc.bg,padding:"2px 7px",borderRadius:"5px"}},`● ${p.complexity}`));}
   card.appendChild(tagRow);
-
   const actRow=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:"8px",borderTop:"1px solid #f1f5f9"}});
   actRow.appendChild(el("span",{style:{fontSize:"10px",color:"#cbd5e1"}},fmtDate(p.dateAdded)));
   const btns=el("div",{style:{display:"flex",gap:"4px"}});
@@ -396,65 +548,84 @@ function renderCard(p) {
   return card;
 }
 
+// ── Test Order Card ────────────────────────────────────────────────────────
+function renderTestOrderCard(o) {
+  const od = isTestOrderOverdue(o);
+  const isComplete = o.status === "Complete";
+  const sc = o.status ? TEST_STATUS_COLORS[o.status] : null;
+  const card = el("div",{className:"card",style:{border:od?"1.5px solid #fca5a5":"1.5px solid #e2e8f0",opacity:isComplete?"0.65":"1"},onClick:()=>{state.viewingTO=o;state.viewTO="detail";render();}});
+
+  // Name + overdue badge
+  const nr = el("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap",marginBottom:"5px",paddingRight:"20px"}});
+  nr.appendChild(el("span",{style:{fontSize:"15px",fontWeight:"700",color:"#0f172a"}},o.name||"—"));
+  if(od) nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"2px 6px",borderRadius:"5px"}},"OVERDUE"));
+  card.appendChild(nr);
+
+  // Test name
+  if(o.testRequired) card.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",fontStyle:"italic",marginBottom:"9px"}},o.testRequired));
+
+  // Status badge
+  if(o.status && sc) {
+    const sb = el("div",{style:{marginBottom:"8px"}});
+    sb.appendChild(el("span",{className:"badge",style:{background:sc.bg,color:sc.text,border:`1.5px solid ${sc.border}`}},`● ${o.status}`));
+    card.appendChild(sb);
+  }
+
+  // Results due target
+  if(o.resultsDueTarget) {
+    const rdRow = el("div",{style:{display:"flex",alignItems:"center",gap:"5px",fontSize:"11px",marginBottom:"8px"}});
+    rdRow.appendChild(el("span",{style:{color:"#94a3b8",fontWeight:"700"}},"Results due:"));
+    rdRow.appendChild(el("span",{style:{color:od?"#dc2626":"#334155",fontWeight:od?"700":"400"}},fmtDate(o.resultsDueTarget)));
+    card.appendChild(rdRow);
+  }
+
+  const actRow = el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:"8px",borderTop:"1px solid #f1f5f9"}});
+  actRow.appendChild(el("span",{style:{fontSize:"10px",color:"#cbd5e1"}},`Entered ${fmtDate(o.dateEntered)}`));
+  const btns = el("div",{style:{display:"flex",gap:"4px"}});
+  const editBtn = el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #e2e8f0",background:"#f8fafc",color:"#64748b",fontSize:"10px",fontWeight:"600"}},"Edit");
+  editBtn.addEventListener("click",e=>{e.stopPropagation();state.formDataTO={...o};state.editingTO=o.id;state.viewTO="form";render();});
+  btns.appendChild(editBtn);
+  const delBtn = el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑");
+  delBtn.addEventListener("click",e=>{e.stopPropagation();state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();render();});
+  btns.appendChild(delBtn);
+  actRow.appendChild(btns);
+  card.appendChild(actRow);
+  return card;
+}
+
 function renderOverlay(content) {
   const overlay=el("div",{className:"overlay"});
   const modal=el("div",{className:"modal"});
-  overlay.addEventListener("click",e=>{if(e.target===overlay){state.view="list";render();}});
+  overlay.addEventListener("click",e=>{if(e.target===overlay){state.view="list";state.viewTO="list";render();}});
   modal.appendChild(content);
   overlay.appendChild(modal);
   return overlay;
 }
 
-// ── Form ───────────────────────────────────────────────────────────────────
+// ── Case Form ──────────────────────────────────────────────────────────────
 function renderForm() {
   const fd=state.formData||emptyForm();
   const wrap=el("div",{style:{padding:"20px 22px 24px"}});
-
   const hdr=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}});
   hdr.appendChild(el("h2",{style:{fontSize:"17px",fontWeight:"700",color:"#0f172a",margin:"0"}},state.editing?"Edit Case":"New Case"));
-  const closeBtn=el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",lineHeight:"1"},onClick:()=>{state.view="list";render();}},"×");
-  hdr.appendChild(closeBtn);
+  hdr.appendChild(el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",lineHeight:"1"},onClick:()=>{state.view="list";render();}},"×"));
   wrap.appendChild(hdr);
-
   function secHead(icon,title,color){const s=el("div",{className:"section-head",style:{color}});s.appendChild(el("span",{},icon));s.appendChild(el("span",{},title));return s;}
   function lbl(text,required){const d=el("div",{className:"field-label"});d.appendChild(el("span",{},text+(required?" *":"")));return d;}
-  function inp(ph,val,key,type="text"){
-    const i=el("input",{type,placeholder:ph||"",value:val||""});
-    i.addEventListener("input",e=>{fd[key]=e.target.value;});
-    i.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});
-    i.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});
-    return i;
-  }
-  function ta(ph,val,key,rows=3){
-    const t=el("textarea",{placeholder:ph||"",rows},val||"");
-    t.addEventListener("input",e=>{fd[key]=e.target.value;});
-    t.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});
-    t.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});
-    return t;
-  }
-  function selEl(opts,val,key){
-    const s=el("select");
-    s.appendChild(el("option",{value:""},"Select…"));
-    opts.forEach(o=>{const opt=el("option",{value:o},o);if(val===o)opt.selected=true;s.appendChild(opt);});
-    s.addEventListener("change",e=>{fd[key]=e.target.value;});
-    return s;
-  }
+  function inp(ph,val,key,type="text"){const i=el("input",{type,placeholder:ph||"",value:val||""});i.addEventListener("input",e=>{fd[key]=e.target.value;});i.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});i.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});return i;}
+  function ta(ph,val,key,rows=3){const t=el("textarea",{placeholder:ph||"",rows},val||"");t.addEventListener("input",e=>{fd[key]=e.target.value;});t.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});t.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});return t;}
+  function selEl(opts,val,key){const s=el("select");s.appendChild(el("option",{value:""},"Select…"));opts.forEach(o=>{const opt=el("option",{value:o},o);if(val===o)opt.selected=true;s.appendChild(opt);});s.addEventListener("change",e=>{fd[key]=e.target.value;});return s;}
   function fw(label,required,child){const d=el("div",{className:"field-wrap"});d.appendChild(lbl(label,required));d.appendChild(child);return d;}
-
-  // Identity
   const idBox=el("div",{style:{background:"#f8faff",border:"1px solid #e0e7ff",borderRadius:"9px",padding:"12px 14px",marginBottom:"12px"}});
   idBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#6366f1",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"8px"}},"🔒 Patient Identity"));
   idBox.appendChild(fw("Name / Identifier",true,inp("e.g. J.S., Patient A…",fd.name,"name")));
   idBox.appendChild(fw("Privacy Reminder",false,inp("e.g. initials only, de-identified…",fd.nameNote,"nameNote")));
   wrap.appendChild(idBox);
-
   const g3=el("div",{className:"grid3",style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 10px"}});
   g3.appendChild(fw("Age",false,inp("34",fd.age,"age")));
   g3.appendChild(fw("Gender",false,selEl(["Male","Female","Non-binary","Prefer not to say","Other"],fd.gender,"gender")));
   g3.appendChild(fw("Date Added",false,inp("",fd.dateAdded,"dateAdded","date")));
   wrap.appendChild(g3);
-
-  // Risk
   wrap.appendChild(secHead("⚠️","Risk","#be123c"));
   const riskBox=el("div",{style:{display:"flex",alignItems:"center",gap:"9px",marginBottom:"12px",background:fd.riskFlag?"#fff1f2":"#f8fafc",border:`1.5px solid ${fd.riskFlag?"#fda4af":"#e2e8f0"}`,borderRadius:"7px",padding:"9px 12px",cursor:"pointer"}});
   const chkDiv=el("div",{style:{width:"16px",height:"16px",borderRadius:"3px",border:`2px solid ${fd.riskFlag?"#be123c":"#cbd5e1"}`,background:fd.riskFlag?"#be123c":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:"0",fontSize:"10px",color:"#fff",fontWeight:"900"}},fd.riskFlag?"✓":"");
@@ -463,15 +634,11 @@ function renderForm() {
   riskBox.appendChild(rt);
   riskBox.addEventListener("click",()=>{fd.riskFlag=!fd.riskFlag;state.formData=fd;refreshForm(wrap);});
   wrap.appendChild(riskBox);
-
-  // Clinical
   wrap.appendChild(secHead("🩺","Clinical Details","#0ea5e9"));
   wrap.appendChild(fw("Diagnosis / Presenting Problem",true,inp("e.g. GAD (F41.1)",fd.diagnosis,"diagnosis")));
   wrap.appendChild(fw("Presenting Issue",false,ta("Brief summary…",fd.presenting,"presenting")));
   wrap.appendChild(fw("Key Clinical Notes",false,ta("History, risk, treatment…",fd.clinicalNotes,"clinicalNotes",4)));
   wrap.appendChild(fw("Discussion Points / Questions",false,ta("What to discuss?",fd.discussionPoints,"discussionPoints")));
-
-  // Follow-up
   wrap.appendChild(secHead("📋","Follow-up","#10b981"));
   const g2=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 10px"}});
   const fudWrap=el("div",{className:"field-wrap"});
@@ -488,13 +655,9 @@ function renderForm() {
   g2.appendChild(fw("Follow-up Status",false,selEl(FOLLOWUP_STATUS,fd.followUpStatus,"followUpStatus")));
   wrap.appendChild(g2);
   wrap.appendChild(fw("Follow-up Notes",false,ta("Outcomes, next steps…",fd.followUpNotes,"followUpNotes",2)));
-
-  // Session notes
   wrap.appendChild(secHead("🗒️","Session Notes Log","#0369a1"));
   wrap.appendChild(el("p",{style:{fontSize:"11px",color:"#94a3b8",marginBottom:"8px",marginTop:"-4px"}},"Timestamped notes — nothing is overwritten."));
   wrap.appendChild(renderSessionLog(fd,wrap));
-
-  // Tags & complexity
   wrap.appendChild(secHead("🏷️","Category & Complexity","#8b5cf6"));
   wrap.appendChild(lbl("Purpose / Category",false));
   const tagBtns=el("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom:"12px"}});
@@ -514,8 +677,6 @@ function renderForm() {
     cxBtns.appendChild(b);
   });
   wrap.appendChild(cxBtns);
-
-  // Actions
   const actRow=el("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"16px",paddingTop:"14px",borderTop:"1px solid #f1f5f9"}});
   const cancelBtn=el("button",{style:{padding:"9px 18px",borderRadius:"7px",border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:"13px",fontWeight:"600"}},"Cancel");
   cancelBtn.addEventListener("click",()=>{state.view="list";render();});
@@ -534,8 +695,8 @@ function renderForm() {
 }
 
 function refreshForm(wrap) {
-  const modal = wrap.closest(".modal");
-  if (modal) { modal.innerHTML=""; modal.appendChild(renderForm()); }
+  const modal=wrap.closest(".modal");
+  if(modal){modal.innerHTML="";modal.appendChild(renderForm());}
 }
 
 function renderSessionLog(fd, formWrap) {
@@ -565,12 +726,183 @@ function renderSessionLog(fd, formWrap) {
   return logWrap;
 }
 
-// ── Detail view ────────────────────────────────────────────────────────────
+// ── Test Order Form ────────────────────────────────────────────────────────
+function renderTestOrderForm() {
+  const fd = state.formDataTO || emptyTestOrderForm();
+  const wrap = el("div",{style:{padding:"20px 22px 24px"}});
+
+  const hdr = el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}});
+  hdr.appendChild(el("h2",{style:{fontSize:"17px",fontWeight:"700",color:"#0f172a",margin:"0"}},state.editingTO ? "Edit Test Order" : "New Test Order"));
+  hdr.appendChild(el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",lineHeight:"1"},onClick:()=>{state.viewTO="list";render();}},"×"));
+  wrap.appendChild(hdr);
+
+  function fw(label,required,child){const d=el("div",{className:"field-wrap"});const lb=el("div",{className:"field-label"});lb.appendChild(el("span",{},label+(required?" *":"")));d.appendChild(lb);d.appendChild(child);return d;}
+  function inp(ph,val,key,type="text"){const i=el("input",{type,placeholder:ph||"",value:val||""});i.addEventListener("input",e=>{fd[key]=e.target.value;});i.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});i.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});return i;}
+
+  // Identity
+  const idBox = el("div",{style:{background:"#f8faff",border:"1px solid #e0e7ff",borderRadius:"9px",padding:"12px 14px",marginBottom:"12px"}});
+  idBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#6366f1",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"8px"}},"🔒 Patient Identity"));
+  idBox.appendChild(fw("Name / Identifier",true,inp("e.g. J.S., Patient A…",fd.name,"name")));
+  wrap.appendChild(idBox);
+
+  wrap.appendChild(fw("Test Required",true,inp("e.g. Whole Exome Sequencing (GeneDx)",fd.testRequired,"testRequired")));
+  wrap.appendChild(fw("Date Entered",false,inp("",fd.dateEntered,"dateEntered","date")));
+
+  // Pipeline status
+  const pipeHead = el("div",{className:"section-head",style:{color:"#0369a1"}});
+  pipeHead.appendChild(el("span",{},"📋"));
+  pipeHead.appendChild(el("span",{},"Pipeline Status"));
+  wrap.appendChild(pipeHead);
+
+  const statusLbl = el("div",{className:"field-label"});
+  statusLbl.appendChild(el("span",{},"Status *"));
+  wrap.appendChild(statusLbl);
+
+  const statusBtns = el("div",{style:{display:"flex",flexDirection:"column",gap:"5px",marginBottom:"14px"}});
+  TEST_STATUSES.forEach(s => {
+    const sc = TEST_STATUS_COLORS[s];
+    const sel = fd.status === s;
+    const df = STATUS_DATE_FIELD[s];
+    const row = el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 13px",borderRadius:"8px",cursor:"pointer",background:sel?sc.bg:"#f8fafc",border:sel?`1.5px solid ${sc.border}`:"1.5px solid #e2e8f0",transition:"all 0.1s"}});
+    const left = el("div",{style:{display:"flex",alignItems:"center",gap:"9px"}});
+    left.appendChild(el("div",{style:{width:"9px",height:"9px",borderRadius:"50%",background:sel?sc.text:"#cbd5e1",flexShrink:"0"}}));
+    left.appendChild(el("span",{style:{fontSize:"13px",fontWeight:sel?"700":"400",color:sel?sc.text:"#64748b"}},s));
+    row.appendChild(left);
+    if(fd[df]) row.appendChild(el("span",{style:{fontSize:"10px",color:"#94a3b8"}},fmtDate(fd[df])));
+    row.addEventListener("click",()=>{
+      fd.status = s;
+      if(!fd[df]) fd[df] = todayISO();
+      state.formDataTO = fd;
+      refreshTOForm(wrap);
+    });
+    statusBtns.appendChild(row);
+  });
+  wrap.appendChild(statusBtns);
+
+  // Results timeline
+  const tlHead = el("div",{className:"section-head",style:{color:"#7c3aed"}});
+  tlHead.appendChild(el("span",{},"📅"));
+  tlHead.appendChild(el("span",{},"Results Timeline"));
+  wrap.appendChild(tlHead);
+  wrap.appendChild(fw("Results Due (Target Date)",false,inp("",fd.resultsDueTarget,"resultsDueTarget","date")));
+
+  // Audit trail — auto-stamped dates that have been set
+  const stamps = [
+    ["Consent Sent",fd.dateConsentSent],
+    ["Consent Received",fd.dateConsentReceived],
+    ["Order Finalised",fd.dateOrderFinalised],
+    ["Results Due (actioned)",fd.dateResultsDue],
+    ["Complete",fd.dateComplete]
+  ].filter(([,d])=>d);
+
+  if(stamps.length > 0) {
+    const auditHead = el("div",{className:"section-head",style:{color:"#94a3b8"}});
+    auditHead.appendChild(el("span",{},"🕐"));
+    auditHead.appendChild(el("span",{},"Audit Trail"));
+    wrap.appendChild(auditHead);
+    const stampBox = el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"8px",padding:"10px 12px",marginBottom:"12px"}});
+    stamps.forEach(([label,date])=>{
+      const row = el("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"11px",padding:"3px 0",borderBottom:"1px solid #f1f5f9"}});
+      row.appendChild(el("span",{style:{color:"#94a3b8"}},label));
+      row.appendChild(el("span",{style:{color:"#334155",fontWeight:"600"}},fmtDate(date)));
+      stampBox.appendChild(row);
+    });
+    wrap.appendChild(stampBox);
+  }
+
+  // Actions
+  const actRow = el("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"16px",paddingTop:"14px",borderTop:"1px solid #f1f5f9"}});
+  const cancelBtn = el("button",{style:{padding:"9px 18px",borderRadius:"7px",border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:"13px",fontWeight:"600"}},"Cancel");
+  cancelBtn.addEventListener("click",()=>{state.viewTO="list";render();});
+  const saveBtn = el("button",{style:{padding:"9px 22px",borderRadius:"7px",border:"none",background:"linear-gradient(135deg,#0ea5e9,#6366f1)",color:"#fff",fontSize:"13px",fontWeight:"700"}},state.editingTO ? "Save Changes" : "Add Order");
+  saveBtn.addEventListener("click",()=>{
+    if(!fd.name||!fd.name.trim()){showToast("Please enter a name or identifier.","error");return;}
+    if(!fd.testRequired||!fd.testRequired.trim()){showToast("Please enter the test required.","error");return;}
+    if(state.editingTO){state.testOrders=state.testOrders.map(o=>o.id===state.editingTO?{...fd,id:state.editingTO}:o);}
+    else{state.testOrders=[...state.testOrders,{...fd,id:Date.now()}];}
+    saveLocal();syncTestOrdersToSheets();
+    state.viewTO="list";state.editingTO=null;state.formDataTO=null;render();
+  });
+  actRow.appendChild(cancelBtn);
+  actRow.appendChild(saveBtn);
+  wrap.appendChild(actRow);
+  return wrap;
+}
+
+function refreshTOForm(wrap) {
+  const modal = wrap.closest(".modal");
+  if(modal){modal.innerHTML="";modal.appendChild(renderTestOrderForm());}
+}
+
+// ── Test Order Detail ──────────────────────────────────────────────────────
+function renderTestOrderDetail() {
+  const o = state.testOrders.find(x=>x.id===state.viewingTO.id) || state.viewingTO;
+  const od = isTestOrderOverdue(o);
+  const sc = o.status ? TEST_STATUS_COLORS[o.status] : null;
+  const wrap = el("div",{style:{padding:"20px 22px 24px"}});
+
+  // Header
+  const hdr = el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"14px"}});
+  const titleWrap = el("div",{});
+  const nr = el("div",{style:{display:"flex",alignItems:"center",gap:"7px",flexWrap:"wrap"}});
+  nr.appendChild(el("h2",{style:{fontSize:"20px",fontWeight:"700",color:"#0f172a",margin:"0"}},o.name||"—"));
+  if(od) nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"3px 8px",borderRadius:"5px"}},"OVERDUE"));
+  titleWrap.appendChild(nr);
+  if(o.testRequired) titleWrap.appendChild(el("div",{style:{fontSize:"13px",color:"#475569",fontStyle:"italic",marginTop:"3px"}},o.testRequired));
+  hdr.appendChild(titleWrap);
+
+  const btnRow = el("div",{style:{display:"flex",gap:"7px",alignItems:"center",flexShrink:"0"}});
+  const delBtn = el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"🗑 Delete");
+  delBtn.addEventListener("click",()=>{state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();state.viewTO="list";state.viewingTO=null;render();});
+  btnRow.appendChild(delBtn);
+  const editBtn = el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #0ea5e9",background:"#fff",color:"#0ea5e9",fontSize:"12px",fontWeight:"600",cursor:"pointer"}},"Edit");
+  editBtn.addEventListener("click",()=>{state.formDataTO={...o};state.editingTO=o.id;state.viewTO="form";render();});
+  btnRow.appendChild(editBtn);
+  btnRow.appendChild(el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",cursor:"pointer",lineHeight:"1"},onClick:()=>{state.viewTO="list";state.viewingTO=null;render();}},"×"));
+  hdr.appendChild(btnRow);
+  wrap.appendChild(hdr);
+
+  // Current status badge
+  if(o.status && sc) {
+    const sb = el("div",{style:{marginBottom:"16px"}});
+    sb.appendChild(el("span",{className:"badge",style:{background:sc.bg,color:sc.text,border:`1.5px solid ${sc.border}`,fontSize:"12px",padding:"4px 14px"}},`● ${o.status}`));
+    wrap.appendChild(sb);
+  }
+
+  // Pipeline timeline
+  wrap.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#94a3b8",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"10px"}},"📋 Pipeline Timeline"));
+  const timeline = el("div",{style:{marginBottom:"16px"}});
+  TEST_STATUSES.forEach((s,i) => {
+    const sc2 = TEST_STATUS_COLORS[s];
+    const df = STATUS_DATE_FIELD[s];
+    const statusIdx = o.status ? TEST_STATUSES.indexOf(o.status) : -1;
+    const completed = statusIdx >= i;
+    const isCurrent = o.status === s;
+    const row = el("div",{style:{display:"flex",alignItems:"center",gap:"10px",padding:"8px 10px",borderRadius:"7px",marginBottom:"4px",background:isCurrent?sc2.bg:"transparent",border:isCurrent?`1px solid ${sc2.border}`:"1px solid transparent"}});
+    row.appendChild(el("div",{style:{width:"10px",height:"10px",borderRadius:"50%",flexShrink:"0",background:completed?sc2.text:"#e2e8f0"}}));
+    row.appendChild(el("span",{style:{fontSize:"12px",fontWeight:isCurrent?"700":"400",color:isCurrent?sc2.text:completed?"#334155":"#94a3b8",flex:"1"}},s));
+    if(df && o[df]) row.appendChild(el("span",{style:{fontSize:"11px",color:"#94a3b8"}},fmtDate(o[df])));
+    timeline.appendChild(row);
+  });
+  wrap.appendChild(timeline);
+
+  // Results due target
+  if(o.resultsDueTarget) {
+    const rdBox = el("div",{style:{background:od?"#fff5f5":"#f0fdf4",border:`1px solid ${od?"#fca5a5":"#bbf7d0"}`,borderRadius:"9px",padding:"12px 14px",marginBottom:"14px"}});
+    rdBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:od?"#dc2626":"#16a34a",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"5px"}},`📅 Results Due Target${od?" — OVERDUE":""}`));
+    rdBox.appendChild(el("div",{style:{fontSize:"15px",fontWeight:"700",color:od?"#dc2626":"#334155"}},fmtDate(o.resultsDueTarget,true)));
+    wrap.appendChild(rdBox);
+  }
+
+  wrap.appendChild(el("div",{style:{fontSize:"10px",color:"#cbd5e1"}},`Entered ${fmtDate(o.dateEntered,true)}`));
+  return wrap;
+}
+
+// ── Case Detail ────────────────────────────────────────────────────────────
 function renderDetail() {
   const p=state.patients.find(x=>x.id===state.viewing.id)||state.viewing;
   const od=isOverdue(p);
   const wrap=el("div",{style:{padding:"20px 22px 24px"}});
-
   const hdr=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"14px"}});
   const titleWrap=el("div",{});
   const nr=el("div",{style:{display:"flex",alignItems:"center",gap:"7px",flexWrap:"wrap"}});
@@ -581,7 +913,6 @@ function renderDetail() {
   const meta=[p.age&&`Age ${p.age}`,p.gender].filter(Boolean).join(" · ");
   if(meta)titleWrap.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginTop:"2px"}},meta));
   hdr.appendChild(titleWrap);
-
   const btnRow=el("div",{style:{display:"flex",gap:"7px",alignItems:"center",flexShrink:"0"}});
   const delBtn=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"🗑 Delete");
   delBtn.addEventListener("click",()=>{state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();state.view="list";state.viewing=null;render();});
@@ -589,23 +920,18 @@ function renderDetail() {
   const editBtn=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #0ea5e9",background:"#fff",color:"#0ea5e9",fontSize:"12px",fontWeight:"600",cursor:"pointer"}},"Edit");
   editBtn.addEventListener("click",()=>{state.formData={...p,sessionNotes:[...(p.sessionNotes||[])]};state.editing=p.id;state.view="form";render();});
   btnRow.appendChild(editBtn);
-  const closeBtn=el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",cursor:"pointer",lineHeight:"1"}},"×");
-  closeBtn.addEventListener("click",()=>{state.view="list";state.viewing=null;render();});
-  btnRow.appendChild(closeBtn);
+  btnRow.appendChild(el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",cursor:"pointer",lineHeight:"1"},onClick:()=>{state.view="list";state.viewing=null;render();}},"×"));
   hdr.appendChild(btnRow);
   wrap.appendChild(hdr);
-
   const tagRow2=el("div",{style:{display:"flex",flexWrap:"wrap",gap:"5px",marginBottom:"14px"}});
   (p.tags||[]).forEach(t=>{const tc=TAG_COLORS[t];if(tc)tagRow2.appendChild(el("span",{className:"badge",style:{background:tc.bg,color:tc.text,border:`1.5px solid ${tc.border}`}},t));});
   if(p.complexity){const cc=COMPLEXITY_COLORS[p.complexity];tagRow2.appendChild(el("span",{style:{display:"inline-flex",alignItems:"center",gap:"3px",fontSize:"10px",fontWeight:"700",color:cc.text,background:cc.bg,padding:"2px 8px",borderRadius:"5px"}},`● ${p.complexity}`));}
   wrap.appendChild(tagRow2);
-
   function sec(icon,title,content){if(!content)return;const d=el("div",{style:{marginBottom:"14px"}});d.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#94a3b8",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"4px"}},`${icon} ${title}`));d.appendChild(el("div",{style:{fontSize:"13px",color:"#334155",lineHeight:"1.75",whiteSpace:"pre-wrap"}},content));wrap.appendChild(d);}
   sec("🩺","Diagnosis / Presenting Problem",p.diagnosis);
   sec("📝","Presenting Issue",p.presenting);
   sec("🗒️","Key Clinical Notes",p.clinicalNotes);
   sec("💬","Discussion Points",p.discussionPoints);
-
   if(p.followUpDate||p.followUpStatus||p.followUpNotes){
     const fuBox=el("div",{style:{background:od?"#fff5f5":"#f0fdf4",border:`1px solid ${od?"#fca5a5":"#bbf7d0"}`,borderRadius:"9px",padding:"12px 14px",marginBottom:"14px"}});
     fuBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:od?"#dc2626":"#16a34a",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"7px"}},`📋 Follow-up${od?" — OVERDUE":""}`));
@@ -616,8 +942,6 @@ function renderDetail() {
     if(p.followUpNotes)fuBox.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",lineHeight:"1.7",whiteSpace:"pre-wrap",marginTop:"6px"}},p.followUpNotes));
     wrap.appendChild(fuBox);
   }
-
-  // Session notes
   wrap.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#94a3b8",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"8px"}},"🗒️ Session Notes Log"));
   const snWrap=el("div",{style:{marginBottom:"14px"}});
   (p.sessionNotes||[]).forEach(n=>{
