@@ -60,11 +60,11 @@ const COMPLEXITY_COLORS = {
   "High":    {bg:"#fff7ed",text:"#c2410c",dot:"#f97316"},
   "Complex": {bg:"#fff1f2",text:"#be123c",dot:"#f43f5e"}
 };
-const FOLLOWUP_STATUS = ["Pending","Discussed","Resolved","Ongoing"];
+const FOLLOWUP_STATUS = ["Pending","Discussed","Done - nil further f'up","Ongoing"];
 const FOLLOWUP_COLORS = {
   "Pending":  {bg:"#fffbeb",text:"#92400e",border:"#fde68a"},
   "Discussed":{bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"},
-  "Resolved": {bg:"#f0fdf4",text:"#166534",border:"#bbf7d0"},
+  "Done - nil further f'up": {bg:"#f1f5f9",text:"#475569",border:"#cbd5e1"},
   "Ongoing":  {bg:"#fdf4ff",text:"#7e22ce",border:"#e9d5ff"}
 };
 
@@ -87,7 +87,7 @@ let state = {
 // ── Helpers ────────────────────────────────────────────────────────────────
 function isOverdue(p) {
   if (!p.followUpDate) return false;
-  if (p.followUpStatus === "Resolved" || p.followUpStatus === "Discussed") return false;
+  if (p.followUpStatus === "Done - nil further f'up" || p.followUpStatus === "Discussed") return false;
   return new Date(p.followUpDate) < new Date();
 }
 function emptyForm() {
