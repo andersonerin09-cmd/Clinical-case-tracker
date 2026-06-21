@@ -36,7 +36,7 @@
 <div id="root"></div>
 <script>
 // ── Config ─────────────────────────────────────────────────────────────────
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxpvDODpWIdpkpCVEjqz21kVd_mKCA9PZtaVireiK0RjgBW4MtJiJzHgaroaVZOYiam/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbydaqBZ1iTMTkk6cWB_ZEUN1I4q7qkGwEHArvGXlCjkC70ue90-mKad7S9EenicKyaa/exec";
 const APP_VERSION = "1.1";
 
 // ── Cases Constants ────────────────────────────────────────────────────────
@@ -105,6 +105,7 @@ let state = {
   formDataTO: null,
   filterStatusTO: "All",
   searchTO: "",
+  sortTO: "dateEntered_desc",
   // Shared
   syncing: false,
   lastSync: null
@@ -126,7 +127,7 @@ function emptyForm() {
   return {name:"",nameNote:"",age:"",gender:"",diagnosis:"",presenting:"",clinicalNotes:"",discussionPoints:"",followUpDate:"",followUpStatus:"Pending",followUpNotes:"",tags:[],complexity:"",riskFlag:false,dateAdded:new Date().toISOString().split("T")[0],sessionNotes:[]};
 }
 function emptyTestOrderForm() {
-  return {name:"",testRequired:"",status:"",dateConsentSent:"",dateConsentReceived:"",dateOrderFinalised:"",resultsDueTarget:"",dateResultsDue:"",dateComplete:"",dateEntered:new Date().toISOString().split("T")[0]};
+  return {name:"",testRequired:"",status:"",dateConsentSent:"",dateConsentReceived:"",dateOrderFinalised:"",resultsDueTarget:"",dateResultsDue:"",dateComplete:"",dateEntered:new Date().toISOString().split("T")[0],notes:[]};
 }
 function todayISO() { return new Date().toISOString().split("T")[0]; }
 function quickDate(days) {
@@ -415,6 +416,13 @@ function renderTestOrdersFilterBar() {
   const searchInput = el("input",{type:"text",placeholder:"Search orders…",value:state.searchTO||"",style:{flex:"1",minWidth:"120px",padding:"6px 10px",fontSize:"12px"}});
   searchInput.addEventListener("input",e=>{state.searchTO=e.target.value;render();});
   searchRow.appendChild(searchInput);
+  const sortSel = el("select",{style:{padding:"5px 8px",fontSize:"11px",color:"#64748b",background:"#f8fafc",width:"auto"},onChange:e=>{state.sortTO=e.target.value;render();}});
+  [["dateEntered_desc","Date Added (newest)"],["dateEntered_asc","Date Added (oldest)"],["name","Name (A–Z)"]].forEach(([v,l])=>{
+    const o=el("option",{value:v},l);
+    if(state.sortTO===v)o.selected=true;
+    sortSel.appendChild(o);
+  });
+  searchRow.appendChild(sortSel);
   bar.appendChild(searchRow);
   const statusRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
   const overdueCount = state.testOrders.filter(isTestOrderOverdue).length;
@@ -479,11 +487,16 @@ function renderTestOrdersList() {
     const q=state.searchTO.toLowerCase();
     list=list.filter(o=>(o.name||"").toLowerCase().includes(q)||(o.testRequired||"").toLowerCase().includes(q));
   }
-  // Incomplete first, then by dateEntered desc
+  // Sort
+  const sortTO = state.sortTO || "dateEntered_desc";
+  if (sortTO === "dateEntered_desc") list.sort((a,b)=>new Date(b.dateEntered||0)-new Date(a.dateEntered||0));
+  else if (sortTO === "dateEntered_asc") list.sort((a,b)=>new Date(a.dateEntered||0)-new Date(b.dateEntered||0));
+  else if (sortTO === "name") list.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  // Always push Complete to bottom regardless of sort
   list.sort((a,b)=>{
     if(a.status==="Complete"&&b.status!=="Complete")return 1;
     if(a.status!=="Complete"&&b.status==="Complete")return -1;
-    return new Date(b.dateEntered||0)-new Date(a.dateEntered||0);
+    return 0;
   });
   if (list.length===0) {
     const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});
@@ -810,6 +823,14 @@ function renderTestOrderForm() {
     wrap.appendChild(stampBox);
   }
 
+  // Notes log
+  const notesHead = el("div",{className:"section-head",style:{color:"#0369a1"}});
+  notesHead.appendChild(el("span",{},"🗒️"));
+  notesHead.appendChild(el("span",{},"Notes Log"));
+  wrap.appendChild(notesHead);
+  wrap.appendChild(el("p",{style:{fontSize:"11px",color:"#94a3b8",marginBottom:"8px",marginTop:"-4px"}},"Timestamped notes — nothing is overwritten."));
+  wrap.appendChild(renderTestOrderNotesLog(fd, wrap));
+
   // Actions
   const actRow = el("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"16px",paddingTop:"14px",borderTop:"1px solid #f1f5f9"}});
   const cancelBtn = el("button",{style:{padding:"9px 18px",borderRadius:"7px",border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:"13px",fontWeight:"600"}},"Cancel");
@@ -832,6 +853,34 @@ function renderTestOrderForm() {
 function refreshTOForm(wrap) {
   const modal = wrap.closest(".modal");
   if(modal){modal.innerHTML="";modal.appendChild(renderTestOrderForm());}
+}
+
+// ── Test Order Notes Log ───────────────────────────────────────────────────
+function renderTestOrderNotesLog(fd, formWrap) {
+  const notes = fd.notes || [];
+  const logWrap = el("div",{style:{marginBottom:"12px"}});
+  notes.forEach(n=>{
+    const note=el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"7px",padding:"8px 10px",marginBottom:"6px",position:"relative"}});
+    note.appendChild(el("div",{style:{fontSize:"10px",color:"#94a3b8",marginBottom:"3px"}},new Date(n.timestamp).toLocaleString("en-GB",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})));
+    note.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",lineHeight:"1.6",paddingRight:"18px",whiteSpace:"pre-wrap"}},n.text));
+    const d=el("button",{style:{position:"absolute",top:"6px",right:"7px",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:"14px",lineHeight:"1"}},"×");
+    d.addEventListener("click",()=>{fd.notes=notes.filter(x=>x.id!==n.id);state.formDataTO=fd;refreshTOForm(formWrap);});
+    note.appendChild(d);
+    logWrap.appendChild(note);
+  });
+  const addRow=el("div",{style:{display:"flex",gap:"7px"}});
+  const ta=el("textarea",{placeholder:"Add timestamped note…",rows:"2",style:{flex:"1",padding:"8px 10px",borderRadius:"7px",border:"1.5px solid #e2e8f0",fontSize:"12px",fontFamily:"inherit",outline:"none",resize:"vertical",background:"#f8fafc"}});
+  ta.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});
+  ta.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});
+  const addBtn=el("button",{style:{alignSelf:"flex-end",padding:"8px 12px",borderRadius:"7px",border:"none",background:"#0ea5e9",color:"#fff",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"+ Add");
+  addBtn.addEventListener("click",()=>{
+    const t=ta.value.trim();if(!t)return;
+    fd.notes=[...(fd.notes||[]),{id:Date.now(),text:t,timestamp:new Date().toISOString()}];
+    state.formDataTO=fd;refreshTOForm(formWrap);
+  });
+  addRow.appendChild(ta);addRow.appendChild(addBtn);
+  logWrap.appendChild(addRow);
+  return logWrap;
 }
 
 // ── Test Order Detail ──────────────────────────────────────────────────────
@@ -895,6 +944,42 @@ function renderTestOrderDetail() {
   }
 
   wrap.appendChild(el("div",{style:{fontSize:"10px",color:"#cbd5e1"}},`Entered ${fmtDate(o.dateEntered,true)}`));
+
+  // Notes log in detail view
+  const notesHead2 = el("div",{className:"section-head",style:{color:"#0369a1",marginTop:"14px"}});
+  notesHead2.appendChild(el("span",{},"🗒️"));
+  notesHead2.appendChild(el("span",{},"Notes Log"));
+  wrap.appendChild(notesHead2);
+  const notesWrap = el("div",{style:{marginBottom:"14px"}});
+  (o.notes||[]).forEach(n=>{
+    const note=el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"7px",padding:"8px 10px",marginBottom:"6px",position:"relative"}});
+    note.appendChild(el("div",{style:{fontSize:"10px",color:"#94a3b8",marginBottom:"3px"}},new Date(n.timestamp).toLocaleString("en-GB",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})));
+    note.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",lineHeight:"1.6",paddingRight:"18px",whiteSpace:"pre-wrap"}},n.text));
+    const delN=el("button",{style:{position:"absolute",top:"6px",right:"7px",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:"14px",lineHeight:"1"}},"×");
+    delN.addEventListener("click",()=>{
+      const updated=state.testOrders.map(x=>x.id===o.id?{...x,notes:(x.notes||[]).filter(s=>s.id!==n.id)}:x);
+      state.testOrders=updated;saveLocal();syncTestOrdersToSheets();
+      state.viewingTO=updated.find(x=>x.id===o.id);render();
+    });
+    note.appendChild(delN);
+    notesWrap.appendChild(note);
+  });
+  const addRowN=el("div",{style:{display:"flex",gap:"7px"}});
+  const taN=el("textarea",{placeholder:"Add timestamped note…",rows:"2",style:{flex:"1",padding:"8px 10px",borderRadius:"7px",border:"1.5px solid #e2e8f0",fontSize:"12px",fontFamily:"inherit",outline:"none",resize:"vertical",background:"#f8fafc"}});
+  taN.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});
+  taN.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});
+  const addBtnN=el("button",{style:{alignSelf:"flex-end",padding:"8px 12px",borderRadius:"7px",border:"none",background:"#0ea5e9",color:"#fff",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"+ Add");
+  addBtnN.addEventListener("click",()=>{
+    const t=taN.value.trim();if(!t)return;
+    const newNote={id:Date.now(),text:t,timestamp:new Date().toISOString()};
+    const updated=state.testOrders.map(x=>x.id===o.id?{...x,notes:[...(x.notes||[]),newNote]}:x);
+    state.testOrders=updated;saveLocal();syncTestOrdersToSheets();
+    state.viewingTO=updated.find(x=>x.id===o.id);render();
+  });
+  addRowN.appendChild(taN);addRowN.appendChild(addBtnN);
+  notesWrap.appendChild(addRowN);
+  wrap.appendChild(notesWrap);
+
   return wrap;
 }
 
