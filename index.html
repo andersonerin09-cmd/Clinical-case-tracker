@@ -106,6 +106,7 @@ let state = {
   filterStatusTO: "All",
   searchTO: "",
   sortTO: "dateEntered_desc",
+  viewMode: "grid",
   // Shared
   syncing: false,
   lastSync: null
@@ -381,6 +382,17 @@ function renderTestOrdersHeader() {
   return hdr;
 }
 
+// ── View Mode Toggle ───────────────────────────────────────────────────────
+function viewToggle() {
+  const wrap = el("div",{style:{display:"flex",border:"1.5px solid #e2e8f0",borderRadius:"7px",overflow:"hidden",flexShrink:"0"}});
+  [["grid","▦"],["list","☰"]].forEach(([mode,icon])=>{
+    const active = (state.viewMode||"grid") === mode;
+    const b = el("button",{style:{padding:"6px 10px",border:"none",background:active?"#1e3a8a":"#f8fafc",color:active?"#fff":"#64748b",fontSize:"13px",cursor:"pointer"},onClick:()=>{state.viewMode=mode;render();}},icon);
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+
 // ── Cases Filter Bar ───────────────────────────────────────────────────────
 function renderFilterBar() {
   const bar = el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}});
@@ -395,6 +407,7 @@ function renderFilterBar() {
     sortSel.appendChild(o);
   });
   searchRow.appendChild(sortSel);
+  searchRow.appendChild(viewToggle());
   bar.appendChild(searchRow);
   const tagRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
   const overdueCount = state.patients.filter(isOverdue).length;
@@ -408,6 +421,7 @@ function renderFilterBar() {
   bar.appendChild(tagRow);
   return bar;
 }
+
 
 // ── Test Orders Filter Bar ─────────────────────────────────────────────────
 function renderTestOrdersFilterBar() {
@@ -423,6 +437,7 @@ function renderTestOrdersFilterBar() {
     sortSel.appendChild(o);
   });
   searchRow.appendChild(sortSel);
+  searchRow.appendChild(viewToggle());
   bar.appendChild(searchRow);
   const statusRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
   const overdueCount = state.testOrders.filter(isTestOrderOverdue).length;
@@ -470,8 +485,8 @@ function renderList() {
   countBar.appendChild(el("span",{style:{fontSize:"12px",color:"#94a3b8"}},`${list.length} case${list.length!==1?"s":""}`));
   countBar.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
   wrap.appendChild(countBar);
-  const grid=el("div",{className:"grid"});
-  list.forEach(p=>grid.appendChild(renderCard(p)));
+  const grid=el("div",{className: state.viewMode==="list" ? "" : "grid"});
+  list.forEach(p=>grid.appendChild(state.viewMode==="list" ? renderCaseRow(p) : renderCard(p)));
   wrap.appendChild(grid);
   return wrap;
 }
@@ -510,8 +525,8 @@ function renderTestOrdersList() {
   countBar.appendChild(el("span",{style:{fontSize:"12px",color:"#94a3b8"}},`${list.length} order${list.length!==1?"s":""}`));
   countBar.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
   wrap.appendChild(countBar);
-  const grid=el("div",{className:"grid"});
-  list.forEach(o=>grid.appendChild(renderTestOrderCard(o)));
+  const grid=el("div",{className: state.viewMode==="list" ? "" : "grid"});
+  list.forEach(o=>grid.appendChild(state.viewMode==="list" ? renderTestOrderRow(o) : renderTestOrderCard(o)));
   wrap.appendChild(grid);
   return wrap;
 }
@@ -561,7 +576,41 @@ function renderCard(p) {
   return card;
 }
 
-// ── Test Order Card ────────────────────────────────────────────────────────
+// ── Case Row (list view) ───────────────────────────────────────────────────
+function renderCaseRow(p) {
+  const od = isOverdue(p);
+  const row = el("div",{style:{background:"#fff",borderRadius:"9px",padding:"10px 14px",cursor:"pointer",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",border:od?"1.5px solid #fca5a5":p.riskFlag?"1.5px solid #fda4af":"1.5px solid #e2e8f0",display:"flex",alignItems:"center",gap:"12px",marginBottom:"6px"},onClick:()=>{state.viewing=p;state.view="detail";render();}});
+
+  const nameBlock = el("div",{style:{flex:"1",minWidth:"0"}});
+  const nr = el("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}});
+  nr.appendChild(el("span",{style:{fontSize:"13px",fontWeight:"700",color:"#0f172a"}},p.name));
+  if(p.riskFlag) nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#be123c"}},"⚠"));
+  if(od) nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"1px 5px",borderRadius:"4px"}},"OVERDUE"));
+  nameBlock.appendChild(nr);
+  if(p.diagnosis) nameBlock.appendChild(el("div",{style:{fontSize:"11px",color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},p.diagnosis));
+  row.appendChild(nameBlock);
+
+  const tagsWrap = el("div",{style:{display:"flex",gap:"3px",flexShrink:"0"}});
+  (p.tags||[]).slice(0,2).forEach(t=>{const tc=TAG_COLORS[t];if(tc)tagsWrap.appendChild(el("span",{style:{display:"inline-flex",padding:"1px 7px",borderRadius:"20px",fontSize:"9px",fontWeight:"700",background:tc.bg,color:tc.text,border:`1px solid ${tc.border}`}},t));});
+  row.appendChild(tagsWrap);
+
+  if(p.followUpStatus){const fc=FOLLOWUP_COLORS[p.followUpStatus];if(fc)row.appendChild(el("span",{className:"badge",style:{background:fc.bg,color:fc.text,border:`1.5px solid ${fc.border}`,flexShrink:"0"}},p.followUpStatus));}
+
+  row.appendChild(el("span",{style:{fontSize:"10px",color:"#cbd5e1",flexShrink:"0",minWidth:"60px",textAlign:"right"}},fmtDate(p.dateAdded)));
+
+  const btns = el("div",{style:{display:"flex",gap:"4px",flexShrink:"0"}});
+  const editBtn=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #e2e8f0",background:"#f8fafc",color:"#64748b",fontSize:"10px",fontWeight:"600"}},"Edit");
+  editBtn.addEventListener("click",e=>{e.stopPropagation();state.formData={...p,sessionNotes:[...(p.sessionNotes||[])]};state.editing=p.id;state.view="form";render();});
+  btns.appendChild(editBtn);
+  const delBtn=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑");
+  delBtn.addEventListener("click",e=>{e.stopPropagation();state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();render();});
+  btns.appendChild(delBtn);
+  row.appendChild(btns);
+
+  return row;
+}
+
+
 function renderTestOrderCard(o) {
   const od = isTestOrderOverdue(o);
   const isComplete = o.status === "Complete";
@@ -604,6 +653,39 @@ function renderTestOrderCard(o) {
   actRow.appendChild(btns);
   card.appendChild(actRow);
   return card;
+}
+
+// ── Test Order Row (list view) ─────────────────────────────────────────────
+function renderTestOrderRow(o) {
+  const od = isTestOrderOverdue(o);
+  const isComplete = o.status === "Complete";
+  const sc = o.status ? TEST_STATUS_COLORS[o.status] : null;
+  const row = el("div",{style:{background:"#fff",borderRadius:"9px",padding:"10px 14px",cursor:"pointer",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",border:od?"1.5px solid #fca5a5":"1.5px solid #e2e8f0",opacity:isComplete?"0.65":"1",display:"flex",alignItems:"center",gap:"12px",marginBottom:"6px"},onClick:()=>{state.viewingTO=o;state.viewTO="detail";render();}});
+
+  const nameBlock = el("div",{style:{flex:"1",minWidth:"0"}});
+  const nr = el("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}});
+  nr.appendChild(el("span",{style:{fontSize:"13px",fontWeight:"700",color:"#0f172a"}},o.name||"—"));
+  if(od) nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"1px 5px",borderRadius:"4px"}},"OVERDUE"));
+  nameBlock.appendChild(nr);
+  if(o.testRequired) nameBlock.appendChild(el("div",{style:{fontSize:"11px",color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},o.testRequired));
+  row.appendChild(nameBlock);
+
+  if(o.status && sc) row.appendChild(el("span",{className:"badge",style:{background:sc.bg,color:sc.text,border:`1.5px solid ${sc.border}`,flexShrink:"0"}},o.status));
+
+  if(o.resultsDueTarget) row.appendChild(el("span",{style:{fontSize:"11px",color:od?"#dc2626":"#94a3b8",fontWeight:od?"700":"400",flexShrink:"0",minWidth:"70px",textAlign:"right"}},fmtDate(o.resultsDueTarget)));
+
+  row.appendChild(el("span",{style:{fontSize:"10px",color:"#cbd5e1",flexShrink:"0",minWidth:"60px",textAlign:"right"}},fmtDate(o.dateEntered)));
+
+  const btns = el("div",{style:{display:"flex",gap:"4px",flexShrink:"0"}});
+  const editBtn=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #e2e8f0",background:"#f8fafc",color:"#64748b",fontSize:"10px",fontWeight:"600"}},"Edit");
+  editBtn.addEventListener("click",e=>{e.stopPropagation();state.formDataTO={...o};state.editingTO=o.id;state.viewTO="form";render();});
+  btns.appendChild(editBtn);
+  const delBtn=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑");
+  delBtn.addEventListener("click",e=>{e.stopPropagation();state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();render();});
+  btns.appendChild(delBtn);
+  row.appendChild(btns);
+
+  return row;
 }
 
 function renderOverlay(content) {
