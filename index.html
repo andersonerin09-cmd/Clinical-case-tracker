@@ -67,12 +67,13 @@ const FOLLOWUP_COLORS = {
 };
 
 // ── Test Orders Constants ──────────────────────────────────────────────────
-const TEST_STATUSES = ["Consent Sent","Consent Received","Order Finalised","Results Due","Complete"];
+const TEST_STATUSES = ["Consent Sent","Consent Received","Order Finalised","Results Due","On Hold","Complete"];
 const TEST_STATUS_COLORS = {
   "Consent Sent":     {bg:"#fffbeb",text:"#92400e",border:"#fde68a"},
   "Consent Received": {bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"},
   "Order Finalised":  {bg:"#f0fdf4",text:"#15803d",border:"#bbf7d0"},
   "Results Due":      {bg:"#fdf4ff",text:"#7e22ce",border:"#e9d5ff"},
+  "On Hold":          {bg:"#f1f5f9",text:"#64748b",border:"#cbd5e1"},
   "Complete":         {bg:"#f1f5f9",text:"#475569",border:"#cbd5e1"}
 };
 const STATUS_DATE_FIELD = {
@@ -80,6 +81,7 @@ const STATUS_DATE_FIELD = {
   "Consent Received": "dateConsentReceived",
   "Order Finalised":  "dateOrderFinalised",
   "Results Due":      "dateResultsDue",
+  "On Hold":          "dateOnHold",
   "Complete":         "dateComplete"
 };
 
@@ -128,7 +130,7 @@ function emptyForm() {
   return {name:"",nameNote:"",age:"",gender:"",diagnosis:"",presenting:"",clinicalNotes:"",discussionPoints:"",followUpDate:"",followUpStatus:"Pending",followUpNotes:"",tags:[],complexity:"",riskFlag:false,dateAdded:new Date().toISOString().split("T")[0],sessionNotes:[]};
 }
 function emptyTestOrderForm() {
-  return {name:"",testRequired:"",status:"",dateConsentSent:"",dateConsentReceived:"",dateOrderFinalised:"",resultsDueTarget:"",dateResultsDue:"",dateComplete:"",dateEntered:new Date().toISOString().split("T")[0],notes:[]};
+  return {name:"",testRequired:"",status:"",dateConsentSent:"",dateConsentReceived:"",dateOrderFinalised:"",resultsDueTarget:"",dateResultsDue:"",dateOnHold:"",dateComplete:"",dateEntered:new Date().toISOString().split("T")[0],notes:[]};
 }
 function todayISO() { return new Date().toISOString().split("T")[0]; }
 function quickDate(days) {
@@ -507,11 +509,10 @@ function renderTestOrdersList() {
   if (sortTO === "dateEntered_desc") list.sort((a,b)=>new Date(b.dateEntered||0)-new Date(a.dateEntered||0));
   else if (sortTO === "dateEntered_asc") list.sort((a,b)=>new Date(a.dateEntered||0)-new Date(b.dateEntered||0));
   else if (sortTO === "name") list.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
-  // Always push Complete to bottom regardless of sort
+  // Always push On Hold and Complete to bottom
   list.sort((a,b)=>{
-    if(a.status==="Complete"&&b.status!=="Complete")return 1;
-    if(a.status!=="Complete"&&b.status==="Complete")return -1;
-    return 0;
+    const rank = s => s==="Complete" ? 2 : s==="On Hold" ? 1 : 0;
+    return rank(a.status) - rank(b.status);
   });
   if (list.length===0) {
     const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});
@@ -887,6 +888,7 @@ function renderTestOrderForm() {
     ["Consent Received",fd.dateConsentReceived],
     ["Order Finalised",fd.dateOrderFinalised],
     ["Results Due (actioned)",fd.dateResultsDue],
+    ["On Hold",fd.dateOnHold],
     ["Complete",fd.dateComplete]
   ].filter(([,d])=>d);
 
