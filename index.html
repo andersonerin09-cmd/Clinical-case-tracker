@@ -644,8 +644,6 @@ function renderTestOrderCard(o) {
     sb.appendChild(el("span",{className:"badge",style:{background:sc.bg,color:sc.text,border:`1.5px solid ${sc.border}`}},`● ${o.status}`));
     card.appendChild(sb);
   }
-
-  // Results due target
   if(o.resultsDueTarget) {
     const rdRow = el("div",{style:{display:"flex",alignItems:"center",gap:"5px",fontSize:"11px",marginBottom:"8px"}});
     rdRow.appendChild(el("span",{style:{color:"#94a3b8",fontWeight:"700"}},"Results due:"));
