@@ -36,7 +36,7 @@
 <div id="root"></div>
 <script>
 // ── Config ─────────────────────────────────────────────────────────────────
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxpvDODpWIdpkpCVEjqz21kVd_mKCA9PZtaVireiK0RjgBW4MtJiJzHgaroaVZOYiam/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbydaqBZ1iTMTkk6cWB_ZEUN1I4q7qkGwEHArvGXlCjkC70ue90-mKad7S9EenicKyaa/exec";
 const APP_VERSION = "1.1";
 
 // ── Cases Constants ────────────────────────────────────────────────────────
@@ -109,6 +109,7 @@ let state = {
   searchTO: "",
   sortTO: "dateEntered_desc",
   viewMode: "grid",
+  hideClosedTO: false,
   // Shared
   syncing: false,
   lastSync: null
@@ -441,7 +442,7 @@ function renderTestOrdersFilterBar() {
   searchRow.appendChild(sortSel);
   searchRow.appendChild(viewToggle());
   bar.appendChild(searchRow);
-  const statusRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
+  const statusRow = el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap",alignItems:"center"}});
   const overdueCount = state.testOrders.filter(isTestOrderOverdue).length;
   ["All",...TEST_STATUSES,"Overdue"].forEach(status=>{
     const active=(state.filterStatusTO||"All")===status;
@@ -450,6 +451,10 @@ function renderTestOrdersFilterBar() {
     const b=el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?(isOD?"#dc2626":"#1e3a8a"):"#f1f5f9",color:active?"#fff":"#64748b",border:active?(isOD?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},onClick:()=>{state.filterStatusTO=status;render();}},`${isOD?"🔴 ":""}${status} (${count})`);
     statusRow.appendChild(b);
   });
+  // Hide complete/on hold toggle
+  const hideClosed = state.hideClosedTO;
+  const hideBtn = el("button",{style:{marginLeft:"6px",padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:hideClosed?"#1e3a8a":"#f1f5f9",color:hideClosed?"#fff":"#64748b",border:hideClosed?"1.5px solid #1e3a8a":"1.5px solid #e2e8f0"},onClick:()=>{state.hideClosedTO=!state.hideClosedTO;render();}},hideClosed ? "⊘ Showing active only" : "Hide complete / on hold");
+  statusRow.appendChild(hideBtn);
   bar.appendChild(statusRow);
   return bar;
 }
@@ -470,6 +475,11 @@ function renderList() {
   else if (sortBy==="dateAdded_asc") list.sort((a,b)=>new Date(a.dateAdded)-new Date(b.dateAdded));
   else if (sortBy==="followUpDate") list.sort((a,b)=>{if(!a.followUpDate)return 1;if(!b.followUpDate)return -1;return new Date(a.followUpDate)-new Date(b.followUpDate);});
   else if (sortBy==="name") list.sort((a,b)=>a.name.localeCompare(b.name));
+  // Always push "Done - nil further f'up" to bottom
+  list.sort((a,b)=>{
+    const done = p => p.followUpStatus==="Done - nil further f'up" ? 1 : 0;
+    return done(a) - done(b);
+  });
   if (list.length===0) {
     const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});
     empty.appendChild(el("div",{style:{fontSize:"40px",marginBottom:"10px"}},"🩺"));
@@ -500,6 +510,7 @@ function renderTestOrdersList() {
   const ft = state.filterStatusTO||"All";
   if (ft==="Overdue") list=list.filter(isTestOrderOverdue);
   else if (ft!=="All") list=list.filter(o=>o.status===ft);
+  if (state.hideClosedTO) list=list.filter(o=>o.status!=="Complete"&&o.status!=="On Hold");
   if (state.searchTO&&state.searchTO.trim()) {
     const q=state.searchTO.toLowerCase();
     list=list.filter(o=>(o.name||"").toLowerCase().includes(q)||(o.testRequired||"").toLowerCase().includes(q));
