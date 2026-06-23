@@ -165,7 +165,7 @@ async function syncFromSheets() {
   try {
     const res = await fetch(`${SCRIPT_URL}?password=${encodeURIComponent(state.password)}`);
     const data = await res.json();
-    if (data.error === "Unauthorized") { state.authed = false; state.password = ""; render(); showToast("Incorrect password","error"); return; }
+    if (data.error === "Unauthorized") { showToast("Sync failed — check password","error"); state.syncing = false; render(); return; }
     if (data.cases) state.patients = data.cases;
     if (data.testOrders) state.testOrders = data.testOrders;
     saveLocal();
