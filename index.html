@@ -122,10 +122,10 @@ function isOverdue(p) {
   return new Date(p.followUpDate) < new Date();
 }
 function isTestOrderOverdue(o) {
-  if (!o.resultsDueTarget) return false;
-  if (o.status === "Complete") return false;
+  if (!o || !o.resultsDueTarget) return false;
+  if (o.status === "Complete" || o.status === "On Hold") return false;
   if (o.status !== "Results Due") return false;
-  return new Date(o.resultsDueTarget) < new Date();
+  try { return new Date(o.resultsDueTarget) < new Date(); } catch(e) { return false; }
 }
 function emptyForm() {
   return {name:"",nameNote:"",age:"",gender:"",diagnosis:"",presenting:"",clinicalNotes:"",discussionPoints:"",followUpDate:"",followUpStatus:"Pending",followUpNotes:"",tags:[],complexity:"",riskFlag:false,dateAdded:new Date().toISOString().split("T")[0],sessionNotes:[]};
@@ -538,7 +538,14 @@ function renderTestOrdersList() {
   countBar.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));
   wrap.appendChild(countBar);
   const grid=el("div",{className: state.viewMode==="list" ? "" : "grid"});
-  list.forEach(o=>grid.appendChild(state.viewMode==="list" ? renderTestOrderRow(o) : renderTestOrderCard(o)));
+  list.forEach(o=>{
+    try {
+      grid.appendChild(state.viewMode==="list" ? renderTestOrderRow(o) : renderTestOrderCard(o));
+    } catch(e) {
+      const err=el("div",{style:{background:"#fff5f5",border:"1px solid #fecaca",borderRadius:"8px",padding:"8px 12px",marginBottom:"6px",fontSize:"11px",color:"#dc2626"}},`Error rendering: ${o.name||o.id}`);
+      grid.appendChild(err);
+    }
+  });
   wrap.appendChild(grid);
   return wrap;
 }
