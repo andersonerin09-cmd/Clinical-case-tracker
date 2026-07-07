@@ -47,7 +47,7 @@ const TAG_COLORS = {
   "MDT":          {bg:"#F0F9FF",text:"#0369a1",border:"#bae6fd"},
   "Order Test":   {bg:"#FFF1F2",text:"#be123c",border:"#fda4af"},
   "Needs Letter": {bg:"#FFF7ED",text:"#c2410c",border:"#fed7aa"},
-  "Research":     {bg:"#FAF5FF",text:"#7e22ce",border:"#d8b4fe"}
+  "Research":     {bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"}
 };
 const COMPLEXITY = ["Low","Moderate","High","Complex"];
 const COMPLEXITY_COLORS = {
@@ -56,12 +56,13 @@ const COMPLEXITY_COLORS = {
   "High":    {bg:"#fff7ed",text:"#c2410c",dot:"#f97316"},
   "Complex": {bg:"#fff1f2",text:"#be123c",dot:"#f43f5e"}
 };
-const FOLLOWUP_STATUS = ["Pending","Discussed","Done - nil further f'up","Ongoing"];
+const FOLLOWUP_STATUS = ["Need action from me","Waiting on pt/Dr","Waiting on results","Discussed","Done - nil further f'up"];
 const FOLLOWUP_COLORS = {
-  "Pending":   {bg:"#fffbeb",text:"#92400e",border:"#fde68a"},
-  "Discussed": {bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"},
-  "Done - nil further f'up": {bg:"#f1f5f9",text:"#475569",border:"#cbd5e1"},
-  "Ongoing":   {bg:"#fdf4ff",text:"#7e22ce",border:"#e9d5ff"}
+  "Need action from me": {bg:"#fff1f2",text:"#be123c",border:"#fda4af"},
+  "Waiting on pt/Dr":    {bg:"#fffbeb",text:"#92400e",border:"#fde68a"},
+  "Waiting on results":  {bg:"#f0f9ff",text:"#0369a1",border:"#bae6fd"},
+  "Discussed":           {bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"},
+  "Done - nil further f'up": {bg:"#f1f5f9",text:"#475569",border:"#cbd5e1"}
 };
 const TEST_STATUSES = ["Consent Sent","Consent Received","Order Finalised","Results Due","On Hold","Complete"];
 const TEST_STATUS_COLORS = {
@@ -394,9 +395,6 @@ function renderCard(p) {
   if(p.riskFlag)nr.appendChild(el("span",{className:"badge",style:{background:"#fff1f2",color:"#be123c",border:"1.5px solid #fda4af",fontSize:"10px"}},"⚠ RISK"));
   if(od)nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"2px 6px",borderRadius:"5px"}},"OVERDUE"));
   card.appendChild(nr);
-  if(p.nameNote)card.appendChild(el("div",{style:{fontSize:"10px",color:"#b0bec5",marginBottom:"2px"}},p.nameNote));
-  const meta=[p.age&&`Age ${p.age}`,p.gender].filter(Boolean).join(" · ");
-  if(meta)card.appendChild(el("div",{style:{fontSize:"11px",color:"#94a3b8",marginBottom:"7px"}},meta));
   if(p.diagnosis)card.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",fontStyle:"italic",marginBottom:"6px"}},p.diagnosis));
   if(p.discussionPoints){const dq=el("div",{style:{fontSize:"11px",color:"#64748b",marginBottom:"7px",lineHeight:"1.5",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:"2",WebkitBoxOrient:"vertical"}});dq.appendChild(el("b",{style:{color:"#94a3b8",fontWeight:"700"}},"Q: "));dq.appendChild(txt(p.discussionPoints));card.appendChild(dq);}
   if(p.followUpStatus||p.followUpDate){const fr=el("div",{style:{display:"flex",alignItems:"center",gap:"5px",marginBottom:"7px",flexWrap:"wrap"}});if(p.followUpStatus){const fc=FOLLOWUP_COLORS[p.followUpStatus];if(fc)fr.appendChild(el("span",{className:"badge",style:{background:fc.bg,color:fc.text,border:`1.5px solid ${fc.border}`}},`↻ ${p.followUpStatus}`));}if(p.followUpDate)fr.appendChild(el("span",{style:{fontSize:"10px",color:"#94a3b8"}},fmtDate(p.followUpDate)));card.appendChild(fr);}
@@ -519,11 +517,7 @@ function renderForm() {
   idBox.appendChild(fw("Name / Identifier",true,inp("e.g. J.S., Patient A…",fd.name,"name")));
   idBox.appendChild(fw("Privacy Reminder",false,inp("e.g. initials only…",fd.nameNote,"nameNote")));
   wrap.appendChild(idBox);
-  const g3=el("div",{className:"grid3",style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 10px"}});
-  g3.appendChild(fw("Age",false,inp("34",fd.age,"age")));
-  g3.appendChild(fw("Gender",false,sel(["Male","Female","Non-binary","Prefer not to say","Other"],fd.gender,"gender")));
-  g3.appendChild(fw("Date Added",false,inp("",fd.dateAdded,"dateAdded","date")));
-  wrap.appendChild(g3);
+  wrap.appendChild(fw("Date Added",false,inp("",fd.dateAdded,"dateAdded","date")));
   wrap.appendChild(sh("⚠️","Risk","#be123c"));
   const rb=el("div",{style:{display:"flex",alignItems:"center",gap:"9px",marginBottom:"12px",background:fd.riskFlag?"#fff1f2":"#f8fafc",border:`1.5px solid ${fd.riskFlag?"#fda4af":"#e2e8f0"}`,borderRadius:"7px",padding:"9px 12px",cursor:"pointer"}});
   const ck=el("div",{style:{width:"16px",height:"16px",borderRadius:"3px",border:`2px solid ${fd.riskFlag?"#be123c":"#cbd5e1"}`,background:fd.riskFlag?"#be123c":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:"0",fontSize:"10px",color:"#fff",fontWeight:"900"}},fd.riskFlag?"✓":"");
@@ -737,8 +731,6 @@ function renderDetail() {
   if(p.riskFlag)nr.appendChild(el("span",{className:"badge",style:{background:"#fff1f2",color:"#be123c",border:"1.5px solid #fda4af",fontSize:"10px"}},"⚠ RISK"));
   tw.appendChild(nr);
   if(p.nameNote)tw.appendChild(el("div",{style:{fontSize:"11px",color:"#b0bec5"}},p.nameNote));
-  const meta=[p.age&&`Age ${p.age}`,p.gender].filter(Boolean).join(" · ");
-  if(meta)tw.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginTop:"2px"}},meta));
   hdr.appendChild(tw);
   const br=el("div",{style:{display:"flex",gap:"7px",alignItems:"center",flexShrink:"0"}});
   const db=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"🗑 Delete");
