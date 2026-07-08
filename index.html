@@ -229,6 +229,11 @@ function renderMain() {
     wrap.appendChild(renderList());
     if (state.view==="form") wrap.appendChild(renderOverlay(renderForm()));
     if (state.view==="detail"&&state.viewing) wrap.appendChild(renderOverlay(renderDetail()));
+  } else if (state.activeTab==="research") {
+    wrap.appendChild(renderResearchFilterBar());
+    wrap.appendChild(renderResearchList());
+    if (state.view==="form") wrap.appendChild(renderOverlay(renderForm()));
+    if (state.view==="detail"&&state.viewing) wrap.appendChild(renderOverlay(renderDetail()));
   } else {
     wrap.appendChild(renderTestOrdersFilterBar());
     wrap.appendChild(renderTestOrdersList());
@@ -240,7 +245,7 @@ function renderMain() {
 
 function renderTabBar() {
   const bar=el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"0 16px",display:"flex"}});
-  [["cases","📋 Cases"],["testOrders","🧬 Test Orders"]].forEach(([tab,label])=>{
+  [["cases","📋 Cases"],["testOrders","🧬 Test Orders"],["research","📚 Research"]].forEach(([tab,label])=>{
     const active=state.activeTab===tab;
     bar.appendChild(el("button",{style:{padding:"11px 18px",border:"none",borderBottom:active?"2.5px solid #0ea5e9":"2.5px solid transparent",background:"none",color:active?"#0ea5e9":"#64748b",fontSize:"13px",fontWeight:active?"700":"500",cursor:"pointer",marginBottom:"-1px"},onClick:()=>{state.activeTab=tab;render();}},label));
   });
@@ -248,7 +253,9 @@ function renderTabBar() {
 }
 
 function renderHeader() {
-  return state.activeTab==="testOrders" ? renderTestOrdersHeader() : renderCasesHeader();
+  if (state.activeTab==="testOrders") return renderTestOrdersHeader();
+  if (state.activeTab==="research") return renderResearchHeader();
+  return renderCasesHeader();
 }
 
 function renderCasesHeader() {
@@ -305,6 +312,55 @@ function viewToggle() {
   return wrap;
 }
 
+function renderResearchHeader() {
+  const rs = state.patients.filter(p=>p.tags&&p.tags.includes("Research"));
+  const hdr=el("div",{style:{background:"linear-gradient(135deg,#0c1445,#1e3a8a,#0369a1)",padding:"20px",color:"#fff"}});
+  const top=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"10px",marginBottom:"14px"}});
+  const tw=el("div",{});
+  tw.appendChild(el("h1",{style:{fontSize:"20px",fontWeight:"700",margin:"0 0 2px",color:"#fff"}},"Clinical Case Tracker"));
+  tw.appendChild(el("p",{style:{margin:"0",color:"#93c5fd",fontSize:"11px"}},"Research Cases"));
+  tw.appendChild(el("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.45)",marginTop:"3px"}},state.lastSync?`Last sync: ${state.lastSync.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}`:"Not yet synced"));
+  top.appendChild(tw);
+  const bw=el("div",{style:{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}});
+  bw.appendChild(el("button",{style:{padding:"7px 14px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:"12px",fontWeight:"600"},onClick:syncFromSheets},state.syncing?"⟳ Syncing…":"⟳ Sync"));
+  bw.appendChild(el("button",{style:{padding:"7px 16px",borderRadius:"8px",border:"none",background:"#fff",color:"#1e3a8a",fontSize:"13px",fontWeight:"700"},onClick:()=>{const fd=emptyForm();fd.tags=["Research"];state.formData=fd;state.editing=null;state.view="form";render();}},"+ New Research Case"));
+  top.appendChild(bw); hdr.appendChild(top);
+  const sr=el("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap"}});
+  const chip=el("div",{style:{background:"rgba(255,255,255,0.1)",borderRadius:"7px",padding:"5px 11px"}});
+  chip.appendChild(el("div",{style:{fontSize:"15px",fontWeight:"700",color:"#fff"}},`📚 ${rs.length}`));
+  chip.appendChild(el("div",{style:{fontSize:"9px",color:"#93c5fd"}},"Research Cases"));
+  sr.appendChild(chip); hdr.appendChild(sr);
+  return hdr;
+}
+
+function renderResearchFilterBar() {
+  const bar=el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}});
+  const sr=el("div",{style:{display:"flex",gap:"8px",alignItems:"center"}});
+  const si=el("input",{type:"text",placeholder:"Search research cases…",value:state.search||"",style:{flex:"1",minWidth:"120px",padding:"6px 10px",fontSize:"12px"}});
+  si.addEventListener("input",e=>{state.search=e.target.value;render();}); sr.appendChild(si);
+  const ss=el("select",{style:{padding:"5px 8px",fontSize:"11px",color:"#64748b",background:"#f8fafc",width:"auto"},onChange:e=>{state.sortBy=e.target.value;render();}});
+  [["dateAdded_desc","Newest first"],["dateAdded_asc","Oldest first"],["name","Name (A–Z)"]].forEach(([v,l])=>{const o=el("option",{value:v},l);if(state.sortBy===v)o.selected=true;ss.appendChild(o);});
+  sr.appendChild(ss); sr.appendChild(viewToggle()); bar.appendChild(sr);
+  return bar;
+}
+
+function renderResearchList() {
+  const wrap=el("div",{style:{padding:"16px 16px 100px"}});
+  let list=state.patients.filter(p=>p.tags&&p.tags.includes("Research"));
+  if(state.search&&state.search.trim()){const q=state.search.toLowerCase();list=list.filter(p=>p.name.toLowerCase().includes(q)||(p.diagnosis||"").toLowerCase().includes(q)||(p.discussionPoints||"").toLowerCase().includes(q));}
+  const sb=state.sortBy||"dateAdded_desc";
+  if(sb==="dateAdded_desc") list.sort((a,b)=>new Date(b.dateAdded)-new Date(a.dateAdded));
+  else if(sb==="dateAdded_asc") list.sort((a,b)=>new Date(a.dateAdded)-new Date(b.dateAdded));
+  else if(sb==="name") list.sort((a,b)=>a.name.localeCompare(b.name));
+  if(list.length===0){const empty=el("div",{style:{textAlign:"center",padding:"60px 0",color:"#94a3b8"}});empty.appendChild(el("div",{style:{fontSize:"40px",marginBottom:"10px"}},"📚"));empty.appendChild(el("div",{style:{fontSize:"16px",fontWeight:"600",color:"#475569",marginBottom:"5px"}},"No research cases yet"));empty.appendChild(el("div",{style:{fontSize:"12px"}},"Tag a case as Research or add a new one."));wrap.appendChild(empty);return wrap;}
+  const cb=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"12px"}});
+  cb.appendChild(el("span",{style:{fontSize:"12px",color:"#94a3b8"}},`${list.length} research case${list.length!==1?"s":""}`));
+  cb.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}})); wrap.appendChild(cb);
+  const grid=el("div",{className:state.viewMode==="list"?"":"grid"});
+  list.forEach(p=>grid.appendChild(state.viewMode==="list"?renderCaseRow(p):renderCard(p)));
+  wrap.appendChild(grid); return wrap;
+}
+
 function renderFilterBar() {
   const bar=el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}});
   const sr=el("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginBottom:"8px"}});
@@ -345,7 +401,7 @@ function renderTestOrdersFilterBar() {
 
 function renderList() {
   const wrap=el("div",{style:{padding:"16px 16px 100px"}});
-  let list=[...state.patients];
+  let list=[...state.patients].filter(p=>!(p.tags&&p.tags.includes("Research")));
   const ft=state.filterTag||"All";
   if(ft==="Overdue") list=list.filter(isOverdue);
   else if(ft!=="All") list=list.filter(p=>p.tags&&p.tags.includes(ft));
