@@ -467,7 +467,7 @@ function renderCard(p) {
   eb.addEventListener("click",e=>{e.stopPropagation();state.formData={...p,sessionNotes:[...(p.sessionNotes||[])]};state.editing=p.id;state.view="form";render();});
   btns.appendChild(eb);
   const db=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑 Delete");
-  db.addEventListener("click",e=>{e.stopPropagation();state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();render();});
+  db.addEventListener("click",e=>{e.stopPropagation();if(!confirm("Delete this case? This cannot be undone."))return;state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();render();});
   btns.appendChild(db); ar.appendChild(btns); card.appendChild(ar);
   return card;
 }
@@ -493,7 +493,7 @@ function renderCaseRow(p) {
   eb.addEventListener("click",e=>{e.stopPropagation();state.formData={...p,sessionNotes:[...(p.sessionNotes||[])]};state.editing=p.id;state.view="form";render();});
   btns.appendChild(eb);
   const db=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑");
-  db.addEventListener("click",e=>{e.stopPropagation();state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();render();});
+  db.addEventListener("click",e=>{e.stopPropagation();if(!confirm("Delete this case? This cannot be undone."))return;state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();render();});
   btns.appendChild(db); row.appendChild(btns);
   return row;
 }
@@ -517,7 +517,7 @@ function renderTestOrderCard(o) {
   eb.addEventListener("click",e=>{e.stopPropagation();state.formDataTO={...o,notes:[...(o.notes||[])]};state.editingTO=o.id;state.viewTO="form";render();});
   btns.appendChild(eb);
   const db=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑");
-  db.addEventListener("click",e=>{e.stopPropagation();state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();render();});
+  db.addEventListener("click",e=>{e.stopPropagation();if(!confirm("Delete this order? This cannot be undone."))return;state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();render();});
   btns.appendChild(db); ar.appendChild(btns); card.appendChild(ar);
   return card;
 }
@@ -542,7 +542,7 @@ function renderTestOrderRow(o) {
   eb.addEventListener("click",e=>{e.stopPropagation();state.formDataTO={...o,notes:[...(o.notes||[])]};state.editingTO=o.id;state.viewTO="form";render();});
   btns.appendChild(eb);
   const db=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑");
-  db.addEventListener("click",e=>{e.stopPropagation();state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();render();});
+  db.addEventListener("click",e=>{e.stopPropagation();if(!confirm("Delete this order? This cannot be undone."))return;state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();render();});
   btns.appendChild(db); row.appendChild(btns);
   return row;
 }
@@ -734,7 +734,7 @@ function renderTestOrderDetail() {
   hdr.appendChild(tw);
   const br=el("div",{style:{display:"flex",gap:"7px",alignItems:"center",flexShrink:"0"}});
   const db=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"🗑 Delete");
-  db.addEventListener("click",()=>{state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();state.viewTO="list";state.viewingTO=null;render();});
+  db.addEventListener("click",()=>{if(!confirm("Delete this order? This cannot be undone."))return;state.testOrders=state.testOrders.filter(x=>x.id!==o.id);saveLocal();syncTestOrdersToSheets();state.viewTO="list";state.viewingTO=null;render();});
   br.appendChild(db);
   const eb=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #0ea5e9",background:"#fff",color:"#0ea5e9",fontSize:"12px",fontWeight:"600",cursor:"pointer"}},"Edit");
   eb.addEventListener("click",()=>{state.formDataTO={...o,notes:[...(o.notes||[])]};state.editingTO=o.id;state.viewTO="form";render();});
@@ -790,7 +790,7 @@ function renderDetail() {
   hdr.appendChild(tw);
   const br=el("div",{style:{display:"flex",gap:"7px",alignItems:"center",flexShrink:"0"}});
   const db=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"🗑 Delete");
-  db.addEventListener("click",()=>{state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();state.view="list";state.viewing=null;render();});
+  db.addEventListener("click",()=>{if(!confirm("Delete this case? This cannot be undone."))return;state.patients=state.patients.filter(x=>x.id!==p.id);saveLocal();syncToSheets();state.view="list";state.viewing=null;render();});
   br.appendChild(db);
   const eb=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #0ea5e9",background:"#fff",color:"#0ea5e9",fontSize:"12px",fontWeight:"600",cursor:"pointer"}},"Edit");
   eb.addEventListener("click",()=>{state.formData={...p,sessionNotes:[...(p.sessionNotes||[])]};state.editing=p.id;state.view="form";render();});
