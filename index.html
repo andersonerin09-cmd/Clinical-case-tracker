@@ -38,7 +38,7 @@
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw7hI0FFWDw7NZ_eD4Vdpz7KgaaKTv86BQsN5SVR8_71xOUJoWxZe7HJtzvYL-KcTO-/exec";
 const APP_VERSION = "2.0";
 
-const TAGS = ["Supervision","Meeting","Conference","Peer Review","MDT","Order Test","Needs Letter","Research"];
+const TAGS = ["Supervision","Meeting","Conference","Peer Review","MDT","Order Test","Needs Letter"];
 const TAG_COLORS = {
   "Supervision":  {bg:"#EEF2FF",text:"#4338ca",border:"#c7d2fe"},
   "Meeting":      {bg:"#F0FDF4",text:"#15803d",border:"#bbf7d0"},
@@ -259,7 +259,7 @@ function renderHeader() {
 }
 
 function renderCasesHeader() {
-  const ps=state.patients;
+  const ps=state.patients.filter(p=>!(p.tags&&p.tags.includes("Research")));
   const overdueCount=ps.filter(isOverdue).length;
   const riskCount=ps.filter(p=>p.riskFlag).length;
   const tagCounts={};
@@ -390,10 +390,11 @@ function renderTestOrdersFilterBar() {
   sr.appendChild(ss); sr.appendChild(viewToggle()); bar.appendChild(sr);
   const statusRow=el("div",{style:{display:"flex",gap:"4px",flexWrap:"wrap"}});
   const oc=state.testOrders.filter(isTestOrderOverdue).length;
-  ["All",...TEST_STATUSES,"Overdue"].forEach(status=>{
+  ["All",...TEST_STATUSES,"No Status","Overdue"].forEach(status=>{
     const active=(state.filterStatusTO||"All")===status;
     const isOD=status==="Overdue";
-    const count=status==="All"?state.testOrders.length:isOD?oc:state.testOrders.filter(o=>o.status===status).length;
+    const isNS=status==="No Status";
+    const count=status==="All"?state.testOrders.length:isOD?oc:isNS?state.testOrders.filter(o=>!o.status||o.status==="").length:state.testOrders.filter(o=>o.status===status).length;
     statusRow.appendChild(el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?(isOD?"#dc2626":"#1e3a8a"):"#f1f5f9",color:active?"#fff":"#64748b",border:active?(isOD?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},onClick:()=>{state.filterStatusTO=status;render();}},`${isOD?"🔴 ":""}${status} (${count})`));
   });
   bar.appendChild(statusRow); return bar;
@@ -427,6 +428,7 @@ function renderTestOrdersList() {
   let list=[...state.testOrders];
   const ft=state.filterStatusTO||"All";
   if(ft==="Overdue") list=list.filter(isTestOrderOverdue);
+  else if(ft==="No Status") list=list.filter(o=>!o.status||o.status==="");
   else if(ft!=="All") list=list.filter(o=>o.status===ft);
   if(state.searchTO&&state.searchTO.trim()){const q=state.searchTO.toLowerCase();list=list.filter(o=>(o.name||"").toLowerCase().includes(q)||(o.testRequired||"").toLowerCase().includes(q));}
   const st=state.sortTO||"dateEntered_desc";
