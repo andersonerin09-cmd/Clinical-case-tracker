@@ -143,6 +143,7 @@ function emptyResearchForm() {
   return {name:"",researchProject:"",status:"",dateLabContacted:"",dateLabApproved:"",dateLabDeclined:"",dateConsentsSent:"",dateConsentsReceived:"",dateNeedBloodCollection:"",dateBloodsSent:"",dateResultsAvailable:"",dateDone:"",dateEntered:todayISO(),notes:[]};
 }
 function todayISO() { return new Date().toISOString().split("T")[0]; }
+function normDate(str) { if(!str) return ""; return str.toString().slice(0,10); }
 function quickDate(days) { const d=new Date(); d.setDate(d.getDate()+days); return d.toISOString().split("T")[0]; }
 function fmtDate(str,long) {
   if(!str) return "";
@@ -690,7 +691,7 @@ function renderForm(){
   idBox.appendChild(fw("Name / Identifier",true,inp("e.g. J.S., Patient A…",fd.name,"name")));
   idBox.appendChild(fw("Privacy Reminder",false,inp("e.g. initials only…",fd.nameNote,"nameNote")));
   wrap.appendChild(idBox);
-  wrap.appendChild(fw("Date Added",false,inp("",fd.dateAdded,"dateAdded","date")));
+  wrap.appendChild(fw("Date Added",false,inp("",normDate(fd.dateAdded),"dateAdded","date")));
   wrap.appendChild(sh("⚠️","Risk","#be123c"));
   const rb=el("div",{style:{display:"flex",alignItems:"center",gap:"9px",marginBottom:"12px",background:fd.riskFlag?"#fff1f2":"#f8fafc",border:`1.5px solid ${fd.riskFlag?"#fda4af":"#e2e8f0"}`,borderRadius:"7px",padding:"9px 12px",cursor:"pointer"}});
   const ck=el("div",{style:{width:"16px",height:"16px",borderRadius:"3px",border:`2px solid ${fd.riskFlag?"#be123c":"#cbd5e1"}`,background:fd.riskFlag?"#be123c":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:"0",fontSize:"10px",color:"#fff",fontWeight:"900"}},fd.riskFlag?"✓":"");
@@ -705,7 +706,7 @@ function renderForm(){
   wrap.appendChild(sh("📋","Follow-up","#10b981"));
   const g2=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 10px"}});
   const fuw=el("div",{className:"field-wrap"});
-  fuw.appendChild(lbl("Follow-up Date",false));fuw.appendChild(inp("",fd.followUpDate,"followUpDate","date"));
+  fuw.appendChild(lbl("Follow-up Date",false));fuw.appendChild(inp("",normDate(fd.followUpDate),"followUpDate","date"));
   const qdr=el("div",{style:{display:"flex",gap:"4px",marginTop:"5px",marginBottom:"4px"}});
   [["1w",7],["2w",14],["1m",30],["3m",90]].forEach(([l,d])=>{const b=el("button",{style:{flex:"1",padding:"3px 0",borderRadius:"5px",border:"1px solid #e2e8f0",background:"#f1f5f9",color:"#64748b",fontSize:"10px",fontWeight:"700"}},`+${l}`);b.addEventListener("click",()=>{fd.followUpDate=quickDate(d);state.formData=fd;refreshForm(wrap);});qdr.appendChild(b);});
   fuw.appendChild(qdr);g2.appendChild(fuw);
@@ -752,12 +753,12 @@ function renderTestOrderForm(){
   idBox.appendChild(fw("Name / Identifier",true,inp("e.g. J.S., Patient A…",fd.name,"name")));
   wrap.appendChild(idBox);
   wrap.appendChild(fw("Test Required",true,inp("e.g. Whole Exome Sequencing (GeneDx)",fd.testRequired,"testRequired")));
-  wrap.appendChild(fw("Date Entered",false,inp("",fd.dateEntered,"dateEntered","date")));
+  wrap.appendChild(fw("Date Entered",false,inp("",normDate(fd.dateEntered),"dateEntered","date")));
   const ph=el("div",{className:"section-head",style:{color:"#0369a1"}});ph.appendChild(el("span",{},"📋"));ph.appendChild(el("span",{},"Pipeline Status"));wrap.appendChild(ph);
   const sl=el("div",{className:"field-label"});sl.appendChild(el("span",{},"Status"));wrap.appendChild(sl);
   wrap.appendChild(renderPipelineSelector(TEST_STATUSES,TEST_STATUS_COLORS,TEST_STATUS_DATE,fd,(s,df)=>{fd.status=s;if(!fd[df])fd[df]=todayISO();state.formDataTO=fd;refreshTOForm(wrap);}));
   const tl=el("div",{className:"section-head",style:{color:"#7c3aed"}});tl.appendChild(el("span",{},"📅"));tl.appendChild(el("span",{},"Results Timeline"));wrap.appendChild(tl);
-  wrap.appendChild(fw("Results Due (Target Date)",false,inp("",fd.resultsDueTarget,"resultsDueTarget","date")));
+  wrap.appendChild(fw("Results Due (Target Date)",false,inp("",normDate(fd.resultsDueTarget),"resultsDueTarget","date")));
   const stamps=[["Consent Sent",fd.dateConsentSent],["Consent Received",fd.dateConsentReceived],["Order Finalised",fd.dateOrderFinalised],["Results Due (actioned)",fd.dateResultsDue],["On Hold",fd.dateOnHold],["Complete",fd.dateComplete]].filter(([,d])=>d);
   if(stamps.length>0){const ah=el("div",{className:"section-head",style:{color:"#94a3b8"}});ah.appendChild(el("span",{},"🕐"));ah.appendChild(el("span",{},"Audit Trail"));wrap.appendChild(ah);const ab=el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"8px",padding:"10px 12px",marginBottom:"12px"}});stamps.forEach(([label,date])=>{const row=el("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"11px",padding:"3px 0",borderBottom:"1px solid #f1f5f9"}});row.appendChild(el("span",{style:{color:"#94a3b8"}},label));row.appendChild(el("span",{style:{color:"#334155",fontWeight:"600"}},fmtDate(date)));ab.appendChild(row);});wrap.appendChild(ab);}
   const nh=el("div",{className:"section-head",style:{color:"#0369a1"}});nh.appendChild(el("span",{},"🗒️"));nh.appendChild(el("span",{},"Notes Log"));wrap.appendChild(nh);
@@ -793,7 +794,7 @@ function renderResearchForm(){
   idBox.appendChild(fw("Name / Identifier",true,inp("e.g. J.S., Patient A…",fd.name,"name")));
   wrap.appendChild(idBox);
   wrap.appendChild(fw("Research Project / Study Name",false,inp("e.g. PD Genetics Study 2026",fd.researchProject,"researchProject")));
-  wrap.appendChild(fw("Date Entered",false,inp("",fd.dateEntered,"dateEntered","date")));
+  wrap.appendChild(fw("Date Entered",false,inp("",normDate(fd.dateEntered),"dateEntered","date")));
   const ph=el("div",{className:"section-head",style:{color:"#0369a1"}});ph.appendChild(el("span",{},"📋"));ph.appendChild(el("span",{},"Pipeline Status"));wrap.appendChild(ph);
   const sl=el("div",{className:"field-label"});sl.appendChild(el("span",{},"Status"));wrap.appendChild(sl);
   wrap.appendChild(renderPipelineSelector(RESEARCH_STATUSES,RESEARCH_STATUS_COLORS,RESEARCH_STATUS_DATE,fd,(s,df)=>{fd.status=s;if(!fd[df])fd[df]=todayISO();state.formDataRC=fd;refreshRCForm(wrap);}));
