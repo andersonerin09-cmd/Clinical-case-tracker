@@ -67,18 +67,20 @@ const FOLLOWUP_COLORS = {
 };
 
 // ── Test Orders Constants ─────────────────────────────────────────────────
-const TEST_STATUSES = ["Consent Sent","Consent Received","Order Finalised","Results Due","On Hold","Complete"];
+const TEST_STATUSES = ["Consent Sent","Consent Received","Order Finalised","Results Due","Results available","On Hold","Complete"];
 const TEST_STATUS_COLORS = {
   "Consent Sent":     {bg:"#fffbeb",text:"#92400e",border:"#fde68a"},
   "Consent Received": {bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"},
   "Order Finalised":  {bg:"#f0fdf4",text:"#15803d",border:"#bbf7d0"},
   "Results Due":      {bg:"#fdf4ff",text:"#7e22ce",border:"#e9d5ff"},
+  "Results available":{bg:"#f0fdfa",text:"#0f766e",border:"#99f6e4"},
   "On Hold":          {bg:"#f1f5f9",text:"#64748b",border:"#cbd5e1"},
   "Complete":         {bg:"#f1f5f9",text:"#475569",border:"#cbd5e1"}
 };
 const TEST_STATUS_DATE = {
   "Consent Sent":"dateConsentSent","Consent Received":"dateConsentReceived",
   "Order Finalised":"dateOrderFinalised","Results Due":"dateResultsDue",
+  "Results available":"dateResultsAvailable",
   "On Hold":"dateOnHold","Complete":"dateComplete"
 };
 
@@ -106,7 +108,7 @@ const RESEARCH_STATUS_DATE = {
 // ── State ─────────────────────────────────────────────────────────────────
 let state = {
   authed:false, password:"",
-  patients:[], testOrders:[], researchCases:[],
+  patients:[], testOrders:[], tasmanOrders:[], researchCases:[],
   activeTab:"cases",
   // Cases
   view:"list", editing:null, viewing:null, formData:null,
@@ -114,6 +116,9 @@ let state = {
   // Test Orders
   viewTO:"list", editingTO:null, viewingTO:null, formDataTO:null,
   filterStatusTO:"All", searchTO:"", sortTO:"dateEntered_desc",
+  // Tasman
+  viewTA:"list", editingTA:null, viewingTA:null, formDataTA:null,
+  filterStatusTA:"All", searchTA:"", sortTA:"dateEntered_desc",
   // Research
   viewRC:"list", editingRC:null, viewingRC:null, formDataRC:null,
   filterStatusRC:"All", searchRC:"", sortRC:"dateEntered_desc",
@@ -137,7 +142,7 @@ function emptyForm() {
   return {name:"",nameNote:"",age:"",gender:"",diagnosis:"",presenting:"",clinicalNotes:"",discussionPoints:"",followUpDate:"",followUpStatus:"Need action from me",followUpNotes:"",tags:[],complexity:"",riskFlag:false,dateAdded:todayISO(),sessionNotes:[]};
 }
 function emptyTestOrderForm() {
-  return {name:"",testRequired:"",status:"",dateConsentSent:"",dateConsentReceived:"",dateOrderFinalised:"",resultsDueTarget:"",dateResultsDue:"",dateOnHold:"",dateComplete:"",dateEntered:todayISO(),notes:[]};
+  return {name:"",testRequired:"",status:"",dateConsentSent:"",dateConsentReceived:"",dateOrderFinalised:"",resultsDueTarget:"",dateResultsDue:"",dateResultsAvailable:"",dateOnHold:"",dateComplete:"",dateEntered:todayISO(),notes:[]};
 }
 function emptyResearchForm() {
   return {name:"",researchProject:"",status:"",dateLabContacted:"",dateLabApproved:"",dateLabDeclined:"",dateConsentsSent:"",dateConsentsReceived:"",dateNeedBloodCollection:"",dateBloodsSent:"",dateResultsAvailable:"",dateDone:"",dateEntered:todayISO(),notes:[]};
@@ -153,6 +158,7 @@ function saveLocal() {
   try {
     localStorage.setItem("cct_cases",JSON.stringify(state.patients));
     localStorage.setItem("cct_testorders",JSON.stringify(state.testOrders));
+    localStorage.setItem("cct_tasman",JSON.stringify(state.tasmanOrders));
     localStorage.setItem("cct_research",JSON.stringify(state.researchCases));
     localStorage.setItem("cct_pw",state.password);
   } catch(e) {}
@@ -166,6 +172,8 @@ function loadLocal() {
     if(pw) state.password=pw;
     if(cases) state.patients=JSON.parse(cases);
     if(to) state.testOrders=JSON.parse(to);
+    const ta=localStorage.getItem("cct_tasman");
+    if(ta) state.tasmanOrders=JSON.parse(ta);
     if(rc) state.researchCases=JSON.parse(rc);
   } catch(e) {}
 }
@@ -179,6 +187,7 @@ async function syncFromSheets() {
     if(data.error==="Unauthorized"){showToast("Sync failed — check password","error");state.syncing=false;render();return;}
     if(data.cases) state.patients=data.cases;
     if(data.testOrders) state.testOrders=data.testOrders;
+    if(data.tasmanOrders) state.tasmanOrders=data.tasmanOrders;
     if(data.researchCases) state.researchCases=data.researchCases;
     saveLocal(); state.lastSync=new Date();
     showToast("Synced ✓","success");
@@ -199,6 +208,16 @@ async function syncTestOrdersToSheets() {
   state.syncing=true; render();
   try {
     const res=await fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify({password:state.password,action:"saveTestOrders",testOrders:state.testOrders})});
+    const data=await res.json();
+    if(data.error) showToast("Save failed: "+data.error,"error");
+    else { state.lastSync=new Date(); showToast("Saved ✓","success"); }
+  } catch(e) { showToast("Save failed","error"); }
+  state.syncing=false; render();
+}
+async function syncTasmanToSheets() {
+  state.syncing=true; render();
+  try {
+    const res=await fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify({password:state.password,action:"saveTasmanOrders",tasmanOrders:state.tasmanOrders})});
     const data=await res.json();
     if(data.error) showToast("Save failed: "+data.error,"error");
     else { state.lastSync=new Date(); showToast("Saved ✓","success"); }
@@ -280,8 +299,12 @@ function renderMain(){
     wrap.appendChild(renderTestOrdersList());
     if(state.viewTO==="form") wrap.appendChild(renderOverlay(renderTestOrderForm()));
     if(state.viewTO==="detail"&&state.viewingTO) wrap.appendChild(renderOverlay(renderTestOrderDetail()));
+  } else if(state.activeTab==="tasman"){
+    wrap.appendChild(renderTasmanFilterBar());
+    wrap.appendChild(renderTasmanList());
+    if(state.viewTA==="form") wrap.appendChild(renderOverlay(renderTasmanForm()));
+    if(state.viewTA==="detail"&&state.viewingTA) wrap.appendChild(renderOverlay(renderTasmanDetail()));
   } else {
-    wrap.appendChild(renderResearchFilterBar());
     wrap.appendChild(renderResearchList());
     if(state.viewRC==="form") wrap.appendChild(renderOverlay(renderResearchForm()));
     if(state.viewRC==="detail"&&state.viewingRC) wrap.appendChild(renderOverlay(renderResearchDetail()));
@@ -291,7 +314,7 @@ function renderMain(){
 
 function renderTabBar(){
   const bar=el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"0 16px",display:"flex"}});
-  [["cases","📋 Cases"],["testOrders","🧬 Test Orders"],["research","📚 Research"]].forEach(([tab,label])=>{
+  [["cases","📋 Cases"],["testOrders","🧬 Test Orders"],["tasman","🏥 Tasman"],["research","📚 Research"]].forEach(([tab,label])=>{
     const active=state.activeTab===tab;
     bar.appendChild(el("button",{style:{padding:"11px 18px",border:"none",borderBottom:active?"2.5px solid #0ea5e9":"2.5px solid transparent",background:"none",color:active?"#0ea5e9":"#64748b",fontSize:"13px",fontWeight:active?"700":"500",cursor:"pointer",marginBottom:"-1px"},onClick:()=>{state.activeTab=tab;render();}},label));
   });
@@ -300,6 +323,7 @@ function renderTabBar(){
 
 function renderHeader(){
   if(state.activeTab==="testOrders") return renderTestOrdersHeader();
+  if(state.activeTab==="tasman") return renderTasmanHeader();
   if(state.activeTab==="research") return renderResearchHeader();
   return renderCasesHeader();
 }
@@ -340,6 +364,162 @@ function renderTestOrdersHeader(){
   hdr.appendChild(sr);return hdr;
 }
 
+function renderTasmanHeader(){
+  const orders=state.tasmanOrders;const oc=orders.filter(isTestOrderOverdue).length;
+  const sc={};TEST_STATUSES.forEach(s=>sc[s]=orders.filter(o=>o.status===s).length);
+  const hdr=makeHeader("Tasman Test Order Pipeline","+ New Order",()=>{state.formDataTA=emptyTestOrderForm();state.editingTA=null;state.viewTA="form";render();});
+  const sr=el("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap"}});
+  const stats=[{label:"Total",val:orders.length,icon:"🏥"},...TEST_STATUSES.map(s=>({label:s,val:sc[s]||0})),...(oc>0?[{label:"Overdue",val:oc,icon:"🔴",warn:true}]:[])];
+  stats.forEach(s=>{const chip=el("div",{style:{background:s.warn?"rgba(248,113,113,0.2)":"rgba(255,255,255,0.1)",borderRadius:"7px",padding:"5px 11px",border:s.warn?"1px solid rgba(248,113,113,0.4)":"none"}});chip.appendChild(el("div",{style:{fontSize:"15px",fontWeight:"700",color:"#fff"}},`${s.icon||""} ${s.val}`));chip.appendChild(el("div",{style:{fontSize:"9px",color:s.warn?"#fca5a5":"#93c5fd"}},s.label));sr.appendChild(chip);});
+  hdr.appendChild(sr);return hdr;
+}
+
+function renderTasmanFilterBar(){
+  const oc=state.tasmanOrders.filter(isTestOrderOverdue).length;
+  const buttons=["All",...TEST_STATUSES,"No Status","Overdue"].map(status=>{
+    const active=(state.filterStatusTA||"All")===status;const isOD=status==="Overdue";const isNS=status==="No Status";
+    const count=status==="All"?state.tasmanOrders.length:isOD?oc:isNS?state.tasmanOrders.filter(o=>!o.status||o.status==="").length:state.tasmanOrders.filter(o=>o.status===status).length;
+    return el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?(isOD?"#dc2626":"#1e3a8a"):"#f1f5f9",color:active?"#fff":"#64748b",border:active?(isOD?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},onClick:()=>{state.filterStatusTA=status;render();}},`${isOD?"🔴 ":""}${status} (${count})`);
+  });
+  return makeFilterBar(state.searchTA,v=>{state.searchTA=v;render();},state.sortTA,[["dateEntered_desc","Newest first"],["dateEntered_asc","Oldest first"],["name","Name (A–Z)"]],v=>{state.sortTA=v;render();},buttons);
+}
+
+function renderTasmanList(){
+  const wrap=el("div",{style:{padding:"16px 16px 100px"}});
+  let list=[...state.tasmanOrders];
+  const ft=state.filterStatusTA||"All";
+  if(ft==="Overdue") list=list.filter(isTestOrderOverdue);
+  else if(ft==="No Status") list=list.filter(o=>!o.status||o.status==="");
+  else if(ft!=="All") list=list.filter(o=>o.status===ft);
+  if(state.searchTA&&state.searchTA.trim()){const q=state.searchTA.toLowerCase();list=list.filter(o=>(o.name||"").toLowerCase().includes(q)||(o.testRequired||"").toLowerCase().includes(q));}
+  const st=state.sortTA||"dateEntered_desc";
+  if(st==="dateEntered_desc") list.sort((a,b)=>new Date(b.dateEntered||0)-new Date(a.dateEntered||0));
+  else if(st==="dateEntered_asc") list.sort((a,b)=>new Date(a.dateEntered||0)-new Date(b.dateEntered||0));
+  else if(st==="name") list.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  list.sort((a,b)=>{const rank=s=>s==="Complete"?2:s==="On Hold"?1:0;return rank(a.status)-rank(b.status);});
+  if(list.length===0) return renderEmpty(wrap,"🏥","No Tasman orders yet","Add a new order.");
+  const cb=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"12px"}});
+  cb.appendChild(el("span",{style:{fontSize:"12px",color:"#94a3b8"}},`${list.length} order${list.length!==1?"s":""}`));
+  cb.appendChild(el("div",{style:{flex:"1",height:"1px",background:"#e2e8f0"}}));wrap.appendChild(cb);
+  const grid=el("div",{className:state.viewMode==="list"?"":"grid"});
+  list.forEach(o=>{try{grid.appendChild(state.viewMode==="list"?renderTasmanRow(o):renderTasmanCard(o));}catch(e){grid.appendChild(el("div",{style:{background:"#fff5f5",border:"1px solid #fecaca",borderRadius:"8px",padding:"8px 12px",marginBottom:"6px",fontSize:"11px",color:"#dc2626"}},`Error: ${o.name||o.id}`));}});
+  wrap.appendChild(grid);return wrap;
+}
+
+function renderTasmanCard(o){
+  const od=isTestOrderOverdue(o);const isComplete=o.status==="Complete";
+  const sc=o.status?TEST_STATUS_COLORS[o.status]:null;
+  const card=el("div",{className:"card",style:{border:od?"1.5px solid #fca5a5":"1.5px solid #e2e8f0",opacity:isComplete?"0.65":"1"},onClick:()=>{state.viewingTA=o;state.viewTA="detail";render();}});
+  const nr=el("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap",marginBottom:"5px",paddingRight:"20px"}});
+  nr.appendChild(el("span",{style:{fontSize:"15px",fontWeight:"700",color:"#0f172a"}},o.name||"—"));
+  if(od)nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"2px 6px",borderRadius:"5px"}},"OVERDUE"));
+  card.appendChild(nr);
+  if(o.testRequired)card.appendChild(el("div",{style:{fontSize:"12px",color:"#334155",fontStyle:"italic",marginBottom:"9px"}},o.testRequired));
+  if(o.status&&sc){const sb=el("div",{style:{marginBottom:"8px"}});sb.appendChild(el("span",{className:"badge",style:{background:sc.bg,color:sc.text,border:`1.5px solid ${sc.border}`}},`● ${o.status}`));card.appendChild(sb);}
+  if(o.resultsDueTarget){const rr=el("div",{style:{display:"flex",alignItems:"center",gap:"5px",fontSize:"11px",marginBottom:"8px"}});rr.appendChild(el("span",{style:{color:"#94a3b8",fontWeight:"700"}},"Results due:"));rr.appendChild(el("span",{style:{color:od?"#dc2626":"#334155",fontWeight:od?"700":"400"}},fmtDate(o.resultsDueTarget)));card.appendChild(rr);}
+  const ar=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:"8px",borderTop:"1px solid #f1f5f9"}});
+  ar.appendChild(el("span",{style:{fontSize:"10px",color:"#cbd5e1"}},`Entered ${fmtDate(o.dateEntered)}`));
+  const btns=el("div",{style:{display:"flex",gap:"4px"}});
+  const eb=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #e2e8f0",background:"#f8fafc",color:"#64748b",fontSize:"10px",fontWeight:"600"}},"Edit");
+  eb.addEventListener("click",e=>{e.stopPropagation();state.formDataTA={...o,notes:[...(o.notes||[])]};state.editingTA=o.id;state.viewTA="form";render();});btns.appendChild(eb);
+  const db=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑");
+  db.addEventListener("click",e=>{e.stopPropagation();if(!confirm("Delete this order? This cannot be undone."))return;state.tasmanOrders=state.tasmanOrders.filter(x=>x.id!==o.id);saveLocal();syncTasmanToSheets();render();});btns.appendChild(db);
+  ar.appendChild(btns);card.appendChild(ar);return card;
+}
+
+function renderTasmanRow(o){
+  const od=isTestOrderOverdue(o);const isComplete=o.status==="Complete";
+  const sc=o.status?TEST_STATUS_COLORS[o.status]:null;
+  const row=el("div",{style:{background:"#fff",borderRadius:"9px",padding:"10px 14px",cursor:"pointer",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",border:od?"1.5px solid #fca5a5":"1.5px solid #e2e8f0",opacity:isComplete?"0.65":"1",display:"flex",alignItems:"center",gap:"12px",marginBottom:"6px"},onClick:()=>{state.viewingTA=o;state.viewTA="detail";render();}});
+  const nb=el("div",{style:{flex:"1",minWidth:"0"}});
+  const nr=el("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}});
+  nr.appendChild(el("span",{style:{fontSize:"13px",fontWeight:"700",color:"#0f172a"}},o.name||"—"));
+  if(od)nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"1px 5px",borderRadius:"4px"}},"OVERDUE"));
+  nb.appendChild(nr);
+  if(o.testRequired)nb.appendChild(el("div",{style:{fontSize:"11px",color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},o.testRequired));
+  row.appendChild(nb);
+  if(o.status&&sc)row.appendChild(el("span",{className:"badge",style:{background:sc.bg,color:sc.text,border:`1.5px solid ${sc.border}`,flexShrink:"0"}},o.status));
+  if(o.resultsDueTarget)row.appendChild(el("span",{style:{fontSize:"11px",color:od?"#dc2626":"#94a3b8",fontWeight:od?"700":"400",flexShrink:"0",minWidth:"70px",textAlign:"right"}},fmtDate(o.resultsDueTarget)));
+  row.appendChild(el("span",{style:{fontSize:"10px",color:"#cbd5e1",flexShrink:"0",minWidth:"60px",textAlign:"right"}},fmtDate(o.dateEntered)));
+  const btns=el("div",{style:{display:"flex",gap:"4px",flexShrink:"0"}});
+  const eb=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #e2e8f0",background:"#f8fafc",color:"#64748b",fontSize:"10px",fontWeight:"600"}},"Edit");
+  eb.addEventListener("click",e=>{e.stopPropagation();state.formDataTA={...o,notes:[...(o.notes||[])]};state.editingTA=o.id;state.viewTA="form";render();});btns.appendChild(eb);
+  const db=el("button",{style:{padding:"3px 8px",borderRadius:"5px",border:"1px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"10px",fontWeight:"700"}},"🗑");
+  db.addEventListener("click",e=>{e.stopPropagation();if(!confirm("Delete this order? This cannot be undone."))return;state.tasmanOrders=state.tasmanOrders.filter(x=>x.id!==o.id);saveLocal();syncTasmanToSheets();render();});btns.appendChild(db);
+  row.appendChild(btns);return row;
+}
+
+function renderTasmanForm(){
+  const fd=state.formDataTA||emptyTestOrderForm();
+  const wrap=el("div",{style:{padding:"20px 22px 24px"}});
+  const hdr=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}});
+  hdr.appendChild(el("h2",{style:{fontSize:"17px",fontWeight:"700",color:"#0f172a",margin:"0"}},state.editingTA?"Edit Tasman Order":"New Tasman Order"));
+  hdr.appendChild(el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",lineHeight:"1"},onClick:()=>{state.viewTA="list";render();}},"×"));
+  wrap.appendChild(hdr);
+  function fw(label,req,child){const d=el("div",{className:"field-wrap"});const lb=el("div",{className:"field-label"});lb.appendChild(el("span",{},label+(req?" *":"")));d.appendChild(lb);d.appendChild(child);return d;}
+  function inp(ph,val,key,type="text"){const i=el("input",{type,placeholder:ph||"",value:val||""});i.addEventListener("input",e=>{fd[key]=e.target.value;});i.addEventListener("focus",e=>{e.target.style.borderColor="#0ea5e9";});i.addEventListener("blur",e=>{e.target.style.borderColor="#e2e8f0";});return i;}
+  const idBox=el("div",{style:{background:"#f8faff",border:"1px solid #e0e7ff",borderRadius:"9px",padding:"12px 14px",marginBottom:"12px"}});
+  idBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#6366f1",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"8px"}},"🔒 Patient Identity"));
+  idBox.appendChild(fw("Name / Identifier",true,inp("e.g. J.S., Patient A…",fd.name,"name")));
+  wrap.appendChild(idBox);
+  wrap.appendChild(fw("Test Required",true,inp("e.g. Whole Exome Sequencing",fd.testRequired,"testRequired")));
+  wrap.appendChild(fw("Date Entered",false,inp("",normDate(fd.dateEntered),"dateEntered","date")));
+  const ph=el("div",{className:"section-head",style:{color:"#0369a1"}});ph.appendChild(el("span",{},"📋"));ph.appendChild(el("span",{},"Pipeline Status"));wrap.appendChild(ph);
+  const sl=el("div",{className:"field-label"});sl.appendChild(el("span",{},"Status"));wrap.appendChild(sl);
+  wrap.appendChild(renderPipelineSelector(TEST_STATUSES,TEST_STATUS_COLORS,TEST_STATUS_DATE,fd,(s,df)=>{fd.status=s;if(!fd[df])fd[df]=todayISO();state.formDataTA=fd;refreshTAForm(wrap);}));
+  const tl=el("div",{className:"section-head",style:{color:"#7c3aed"}});tl.appendChild(el("span",{},"📅"));tl.appendChild(el("span",{},"Results Timeline"));wrap.appendChild(tl);
+  wrap.appendChild(fw("Results Due (Target Date)",false,inp("",normDate(fd.resultsDueTarget),"resultsDueTarget","date")));
+  const stamps=[["Consent Sent",fd.dateConsentSent],["Consent Received",fd.dateConsentReceived],["Order Finalised",fd.dateOrderFinalised],["Results Due (actioned)",fd.dateResultsDue],["Results available",fd.dateResultsAvailable],["On Hold",fd.dateOnHold],["Complete",fd.dateComplete]].filter(([,d])=>d);
+  if(stamps.length>0){const ah=el("div",{className:"section-head",style:{color:"#94a3b8"}});ah.appendChild(el("span",{},"🕐"));ah.appendChild(el("span",{},"Audit Trail"));wrap.appendChild(ah);const ab=el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"8px",padding:"10px 12px",marginBottom:"12px"}});stamps.forEach(([label,date])=>{const row=el("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"11px",padding:"3px 0",borderBottom:"1px solid #f1f5f9"}});row.appendChild(el("span",{style:{color:"#94a3b8"}},label));row.appendChild(el("span",{style:{color:"#334155",fontWeight:"600"}},fmtDate(date)));ab.appendChild(row);});wrap.appendChild(ab);}
+  const nh=el("div",{className:"section-head",style:{color:"#0369a1"}});nh.appendChild(el("span",{},"🗒️"));nh.appendChild(el("span",{},"Notes Log"));wrap.appendChild(nh);
+  wrap.appendChild(el("p",{style:{fontSize:"11px",color:"#94a3b8",marginBottom:"8px",marginTop:"-4px"}},"Timestamped notes — nothing is overwritten."));
+  wrap.appendChild(renderNotesLog(fd.notes,id=>{fd.notes=(fd.notes||[]).filter(x=>x.id!==id);state.formDataTA=fd;refreshTAForm(wrap);},t=>{fd.notes=[...(fd.notes||[]),{id:Date.now(),text:t,timestamp:new Date().toISOString()}];state.formDataTA=fd;refreshTAForm(wrap);}));
+  const ar=el("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"16px",paddingTop:"14px",borderTop:"1px solid #f1f5f9"}});
+  const cnc=el("button",{style:{padding:"9px 18px",borderRadius:"7px",border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:"13px",fontWeight:"600"}},"Cancel");
+  cnc.addEventListener("click",()=>{state.viewTA="list";render();});
+  const sv=el("button",{style:{padding:"9px 22px",borderRadius:"7px",border:"none",background:"linear-gradient(135deg,#0ea5e9,#6366f1)",color:"#fff",fontSize:"13px",fontWeight:"700"}},state.editingTA?"Save Changes":"Add Order");
+  sv.addEventListener("click",()=>{
+    if(!fd.name||!fd.name.trim()){showToast("Please enter a name or identifier.","error");return;}
+    if(!fd.testRequired||!fd.testRequired.trim()){showToast("Please enter the test required.","error");return;}
+    if(state.editingTA){state.tasmanOrders=state.tasmanOrders.map(o=>o.id===state.editingTA?{...fd,id:state.editingTA}:o);}
+    else{state.tasmanOrders=[...state.tasmanOrders,{...fd,id:Date.now()}];}
+    saveLocal();syncTasmanToSheets();state.viewTA="list";state.editingTA=null;state.formDataTA=null;render();
+  });
+  ar.appendChild(cnc);ar.appendChild(sv);wrap.appendChild(ar);
+  if(!state.editingTA) requestAnimationFrame(()=>{const i=wrap.querySelector('input[placeholder="e.g. J.S., Patient A…"]');if(i)i.focus();});
+  return wrap;
+}
+function refreshTAForm(wrap){const modal=wrap.closest(".modal");if(modal){modal.innerHTML="";modal.appendChild(renderTasmanForm());}}
+
+function renderTasmanDetail(){
+  const o=state.tasmanOrders.find(x=>x.id===state.viewingTA.id)||state.viewingTA;
+  const od=isTestOrderOverdue(o);const sc=o.status?TEST_STATUS_COLORS[o.status]:null;
+  const wrap=el("div",{style:{padding:"20px 22px 24px"}});
+  const hdr=el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"14px"}});
+  const tw=el("div",{});
+  const nr=el("div",{style:{display:"flex",alignItems:"center",gap:"7px",flexWrap:"wrap"}});
+  nr.appendChild(el("h2",{style:{fontSize:"20px",fontWeight:"700",color:"#0f172a",margin:"0"}},o.name||"—"));
+  if(od)nr.appendChild(el("span",{style:{fontSize:"9px",fontWeight:"700",color:"#dc2626",background:"#fee2e2",padding:"3px 8px",borderRadius:"5px"}},"OVERDUE"));
+  tw.appendChild(nr);
+  if(o.testRequired)tw.appendChild(el("div",{style:{fontSize:"13px",color:"#475569",fontStyle:"italic",marginTop:"3px"}},o.testRequired));
+  hdr.appendChild(tw);
+  const br=el("div",{style:{display:"flex",gap:"7px",alignItems:"center",flexShrink:"0"}});
+  const db=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #fecaca",background:"#fff5f5",color:"#dc2626",fontSize:"12px",fontWeight:"700",cursor:"pointer"}},"🗑 Delete");
+  db.addEventListener("click",()=>{if(!confirm("Delete this order? This cannot be undone."))return;state.tasmanOrders=state.tasmanOrders.filter(x=>x.id!==o.id);saveLocal();syncTasmanToSheets();state.viewTA="list";state.viewingTA=null;render();});br.appendChild(db);
+  const eb=el("button",{style:{padding:"5px 10px",borderRadius:"7px",border:"1.5px solid #0ea5e9",background:"#fff",color:"#0ea5e9",fontSize:"12px",fontWeight:"600",cursor:"pointer"}},"Edit");
+  eb.addEventListener("click",()=>{state.formDataTA={...o,notes:[...(o.notes||[])]};state.editingTA=o.id;state.viewTA="form";render();});br.appendChild(eb);
+  br.appendChild(el("button",{style:{background:"none",border:"none",fontSize:"22px",color:"#94a3b8",cursor:"pointer",lineHeight:"1"},onClick:()=>{state.viewTA="list";state.viewingTA=null;render();}},"×"));
+  hdr.appendChild(br);wrap.appendChild(hdr);
+  if(o.status&&sc){const sb=el("div",{style:{marginBottom:"16px"}});sb.appendChild(el("span",{className:"badge",style:{background:sc.bg,color:sc.text,border:`1.5px solid ${sc.border}`,fontSize:"12px",padding:"4px 14px"}},`● ${o.status}`));wrap.appendChild(sb);}
+  wrap.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:"#94a3b8",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:"10px"}},"📋 Pipeline Timeline"));
+  wrap.appendChild(renderPipelineTimeline(TEST_STATUSES,TEST_STATUS_COLORS,TEST_STATUS_DATE,o.status,o));
+  if(o.resultsDueTarget){const rb=el("div",{style:{background:od?"#fff5f5":"#f0fdf4",border:`1px solid ${od?"#fca5a5":"#bbf7d0"}`,borderRadius:"9px",padding:"12px 14px",marginBottom:"14px"}});rb.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"700",color:od?"#dc2626":"#16a34a",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"5px"}},`📅 Results Due Target${od?" — OVERDUE":""}`));rb.appendChild(el("div",{style:{fontSize:"15px",fontWeight:"700",color:od?"#dc2626":"#334155"}},fmtDate(o.resultsDueTarget,true)));wrap.appendChild(rb);}
+  wrap.appendChild(el("div",{style:{fontSize:"10px",color:"#cbd5e1",marginBottom:"14px"}},`Entered ${fmtDate(o.dateEntered,true)}`));
+  const nh=el("div",{className:"section-head",style:{color:"#0369a1",marginTop:"4px"}});nh.appendChild(el("span",{},"🗒️"));nh.appendChild(el("span",{},"Notes Log"));wrap.appendChild(nh);
+  wrap.appendChild(renderNotesLog(o.notes,id=>{const updated=state.tasmanOrders.map(x=>x.id===o.id?{...x,notes:(x.notes||[]).filter(s=>s.id!==id)}:x);state.tasmanOrders=updated;saveLocal();syncTasmanToSheets();state.viewingTA=updated.find(x=>x.id===o.id);render();},t=>{const nn={id:Date.now(),text:t,timestamp:new Date().toISOString()};const updated=state.tasmanOrders.map(x=>x.id===o.id?{...x,notes:[...(x.notes||[]),nn]}:x);state.tasmanOrders=updated;saveLocal();syncTasmanToSheets();state.viewingTA=updated.find(x=>x.id===o.id);render();}));
+  return wrap;
+}
+
 function renderResearchHeader(){
   const rc=state.researchCases;
   const sc={};RESEARCH_STATUSES.forEach(s=>sc[s]=rc.filter(r=>r.status===s).length);
@@ -363,7 +543,14 @@ function makeFilterBar(searchVal,onSearch,sortVal,sortOptions,onSort,extraButton
   const bar=el("div",{style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}});
   const sr=el("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginBottom:extraButtons?"8px":"0"}});
   const si=el("input",{type:"text",placeholder:"Search…",value:searchVal||"",style:{flex:"1",minWidth:"120px",padding:"6px 10px",fontSize:"12px"}});
-  si.addEventListener("input",e=>onSearch(e.target.value));sr.appendChild(si);
+  si.setAttribute("data-search","1");
+  si.addEventListener("input",e=>{
+    const val=e.target.value;const pos=e.target.selectionStart;
+    onSearch(val);
+    // restore focus and cursor after render
+    requestAnimationFrame(()=>{const s=document.querySelector('[data-search]');if(s){s.focus();try{s.setSelectionRange(pos,pos);}catch(e){}}});
+  });
+  sr.appendChild(si);
   const ss=el("select",{style:{padding:"5px 8px",fontSize:"11px",color:"#64748b",background:"#f8fafc",width:"auto"},onChange:e=>onSort(e.target.value)});
   sortOptions.forEach(([v,l])=>{const o=el("option",{value:v},l);if(sortVal===v)o.selected=true;ss.appendChild(o);});
   sr.appendChild(ss);sr.appendChild(viewToggle());bar.appendChild(sr);
@@ -759,7 +946,7 @@ function renderTestOrderForm(){
   wrap.appendChild(renderPipelineSelector(TEST_STATUSES,TEST_STATUS_COLORS,TEST_STATUS_DATE,fd,(s,df)=>{fd.status=s;if(!fd[df])fd[df]=todayISO();state.formDataTO=fd;refreshTOForm(wrap);}));
   const tl=el("div",{className:"section-head",style:{color:"#7c3aed"}});tl.appendChild(el("span",{},"📅"));tl.appendChild(el("span",{},"Results Timeline"));wrap.appendChild(tl);
   wrap.appendChild(fw("Results Due (Target Date)",false,inp("",normDate(fd.resultsDueTarget),"resultsDueTarget","date")));
-  const stamps=[["Consent Sent",fd.dateConsentSent],["Consent Received",fd.dateConsentReceived],["Order Finalised",fd.dateOrderFinalised],["Results Due (actioned)",fd.dateResultsDue],["On Hold",fd.dateOnHold],["Complete",fd.dateComplete]].filter(([,d])=>d);
+  const stamps=[["Consent Sent",fd.dateConsentSent],["Consent Received",fd.dateConsentReceived],["Order Finalised",fd.dateOrderFinalised],["Results Due (actioned)",fd.dateResultsDue],["Results available",fd.dateResultsAvailable],["On Hold",fd.dateOnHold],["Complete",fd.dateComplete]].filter(([,d])=>d);
   if(stamps.length>0){const ah=el("div",{className:"section-head",style:{color:"#94a3b8"}});ah.appendChild(el("span",{},"🕐"));ah.appendChild(el("span",{},"Audit Trail"));wrap.appendChild(ah);const ab=el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"8px",padding:"10px 12px",marginBottom:"12px"}});stamps.forEach(([label,date])=>{const row=el("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"11px",padding:"3px 0",borderBottom:"1px solid #f1f5f9"}});row.appendChild(el("span",{style:{color:"#94a3b8"}},label));row.appendChild(el("span",{style:{color:"#334155",fontWeight:"600"}},fmtDate(date)));ab.appendChild(row);});wrap.appendChild(ab);}
   const nh=el("div",{className:"section-head",style:{color:"#0369a1"}});nh.appendChild(el("span",{},"🗒️"));nh.appendChild(el("span",{},"Notes Log"));wrap.appendChild(nh);
   wrap.appendChild(el("p",{style:{fontSize:"11px",color:"#94a3b8",marginBottom:"8px",marginTop:"-4px"}},"Timestamped notes — nothing is overwritten."));
@@ -775,7 +962,9 @@ function renderTestOrderForm(){
     else{state.testOrders=[...state.testOrders,{...fd,id:Date.now()}];}
     saveLocal();syncTestOrdersToSheets();state.viewTO="list";state.editingTO=null;state.formDataTO=null;render();
   });
-  ar.appendChild(cnc);ar.appendChild(sv);wrap.appendChild(ar);return wrap;
+  ar.appendChild(cnc);ar.appendChild(sv);wrap.appendChild(ar);
+  if(!state.editingTO) requestAnimationFrame(()=>{const i=wrap.querySelector('input[placeholder="e.g. J.S., Patient A…"]');if(i)i.focus();});
+  return wrap;
 }
 function refreshTOForm(wrap){const modal=wrap.closest(".modal");if(modal){modal.innerHTML="";modal.appendChild(renderTestOrderForm());}}
 
