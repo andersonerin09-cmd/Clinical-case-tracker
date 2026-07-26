@@ -466,7 +466,7 @@ function renderTasmanForm(){
   wrap.appendChild(fw("Date Entered",false,inp("",normDate(fd.dateEntered),"dateEntered","date")));
   const ph=el("div",{className:"section-head",style:{color:"#0369a1"}});ph.appendChild(el("span",{},"📋"));ph.appendChild(el("span",{},"Pipeline Status"));wrap.appendChild(ph);
   const sl=el("div",{className:"field-label"});sl.appendChild(el("span",{},"Status"));wrap.appendChild(sl);
-  wrap.appendChild(renderPipelineSelector(TEST_STATUSES,TEST_STATUS_COLORS,TEST_STATUS_DATE,fd,(s,df)=>{fd.status=s;if(!fd[df])fd[df]=todayISO();state.formDataTA=fd;refreshTAForm(wrap);}));
+  wrap.appendChild(renderPipelineSelector(TEST_STATUSES,TEST_STATUS_COLORS,TEST_STATUS_DATE,fd,(s,df,desel)=>{fd.status=desel?"":s;if(!desel&&!fd[df])fd[df]=todayISO();state.formDataTA=fd;refreshTAForm(wrap);}));
   const tl=el("div",{className:"section-head",style:{color:"#7c3aed"}});tl.appendChild(el("span",{},"📅"));tl.appendChild(el("span",{},"Results Timeline"));wrap.appendChild(tl);
   wrap.appendChild(fw("Results Due (Target Date)",false,inp("",normDate(fd.resultsDueTarget),"resultsDueTarget","date")));
   const stamps=[["Consent Sent",fd.dateConsentSent],["Consent Received",fd.dateConsentReceived],["Order Finalised",fd.dateOrderFinalised],["Results Due (actioned)",fd.dateResultsDue],["Results available",fd.dateResultsAvailable],["On Hold",fd.dateOnHold],["Complete",fd.dateComplete]].filter(([,d])=>d);
@@ -837,7 +837,7 @@ function renderPipelineSelector(statuses,colorMap,dateMap,fd,onSelect){
     left.appendChild(el("span",{style:{fontSize:"13px",fontWeight:sel?"700":"400",color:sel?sc.text:"#64748b"}},s));
     row.appendChild(left);
     if(fd[df])row.appendChild(el("span",{style:{fontSize:"10px",color:"#94a3b8"}},fmtDate(fd[df])));
-    row.addEventListener("click",()=>onSelect(s,df));
+    row.addEventListener("click",()=>onSelect(s,df,fd.status===s));
     wrap.appendChild(row);
   });
   return wrap;
@@ -943,7 +943,7 @@ function renderTestOrderForm(){
   wrap.appendChild(fw("Date Entered",false,inp("",normDate(fd.dateEntered),"dateEntered","date")));
   const ph=el("div",{className:"section-head",style:{color:"#0369a1"}});ph.appendChild(el("span",{},"📋"));ph.appendChild(el("span",{},"Pipeline Status"));wrap.appendChild(ph);
   const sl=el("div",{className:"field-label"});sl.appendChild(el("span",{},"Status"));wrap.appendChild(sl);
-  wrap.appendChild(renderPipelineSelector(TEST_STATUSES,TEST_STATUS_COLORS,TEST_STATUS_DATE,fd,(s,df)=>{fd.status=s;if(!fd[df])fd[df]=todayISO();state.formDataTO=fd;refreshTOForm(wrap);}));
+  wrap.appendChild(renderPipelineSelector(TEST_STATUSES,TEST_STATUS_COLORS,TEST_STATUS_DATE,fd,(s,df,desel)=>{fd.status=desel?"":s;if(!desel&&!fd[df])fd[df]=todayISO();state.formDataTO=fd;refreshTOForm(wrap);}));
   const tl=el("div",{className:"section-head",style:{color:"#7c3aed"}});tl.appendChild(el("span",{},"📅"));tl.appendChild(el("span",{},"Results Timeline"));wrap.appendChild(tl);
   wrap.appendChild(fw("Results Due (Target Date)",false,inp("",normDate(fd.resultsDueTarget),"resultsDueTarget","date")));
   const stamps=[["Consent Sent",fd.dateConsentSent],["Consent Received",fd.dateConsentReceived],["Order Finalised",fd.dateOrderFinalised],["Results Due (actioned)",fd.dateResultsDue],["Results available",fd.dateResultsAvailable],["On Hold",fd.dateOnHold],["Complete",fd.dateComplete]].filter(([,d])=>d);
@@ -986,7 +986,7 @@ function renderResearchForm(){
   wrap.appendChild(fw("Date Entered",false,inp("",normDate(fd.dateEntered),"dateEntered","date")));
   const ph=el("div",{className:"section-head",style:{color:"#0369a1"}});ph.appendChild(el("span",{},"📋"));ph.appendChild(el("span",{},"Pipeline Status"));wrap.appendChild(ph);
   const sl=el("div",{className:"field-label"});sl.appendChild(el("span",{},"Status"));wrap.appendChild(sl);
-  wrap.appendChild(renderPipelineSelector(RESEARCH_STATUSES,RESEARCH_STATUS_COLORS,RESEARCH_STATUS_DATE,fd,(s,df)=>{fd.status=s;if(!fd[df])fd[df]=todayISO();state.formDataRC=fd;refreshRCForm(wrap);}));
+  wrap.appendChild(renderPipelineSelector(RESEARCH_STATUSES,RESEARCH_STATUS_COLORS,RESEARCH_STATUS_DATE,fd,(s,df,desel)=>{fd.status=desel?"":s;if(!desel&&!fd[df])fd[df]=todayISO();state.formDataRC=fd;refreshRCForm(wrap);}));
   const stamps=Object.entries(RESEARCH_STATUS_DATE).map(([label,key])=>[label,fd[key]]).filter(([,d])=>d);
   if(stamps.length>0){const ah=el("div",{className:"section-head",style:{color:"#94a3b8"}});ah.appendChild(el("span",{},"🕐"));ah.appendChild(el("span",{},"Audit Trail"));wrap.appendChild(ah);const ab=el("div",{style:{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:"8px",padding:"10px 12px",marginBottom:"12px"}});stamps.forEach(([label,date])=>{const row=el("div",{style:{display:"flex",justifyContent:"space-between",fontSize:"11px",padding:"3px 0",borderBottom:"1px solid #f1f5f9"}});row.appendChild(el("span",{style:{color:"#94a3b8"}},label));row.appendChild(el("span",{style:{color:"#334155",fontWeight:"600"}},fmtDate(date)));ab.appendChild(row);});wrap.appendChild(ab);}
   const nh=el("div",{className:"section-head",style:{color:"#0369a1"}});nh.appendChild(el("span",{},"🗒️"));nh.appendChild(el("span",{},"Notes Log"));wrap.appendChild(nh);
