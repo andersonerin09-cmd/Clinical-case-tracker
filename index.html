@@ -147,7 +147,9 @@ function emptyTestOrderForm() {
 function emptyResearchForm() {
   return {name:"",researchProject:"",status:"",dateLabContacted:"",dateLabApproved:"",dateLabDeclined:"",dateConsentsSent:"",dateConsentsReceived:"",dateNeedBloodCollection:"",dateBloodsSent:"",dateResultsAvailable:"",dateDone:"",dateEntered:todayISO(),notes:[]};
 }
-function todayISO() { return new Date().toISOString().split("T")[0]; }
+function dedup(arr) {
+  return Object.values((arr||[]).reduce((acc,x)=>{if(x.id)acc[x.id]=x;return acc;},{}));
+}
 function normDate(str) { if(!str) return ""; return str.toString().slice(0,10); }
 function quickDate(days) { const d=new Date(); d.setDate(d.getDate()+days); return d.toISOString().split("T")[0]; }
 function fmtDate(str,long) {
@@ -170,11 +172,11 @@ function loadLocal() {
     const to=localStorage.getItem("cct_testorders");
     const rc=localStorage.getItem("cct_research");
     if(pw) state.password=pw;
-    if(cases) state.patients=JSON.parse(cases);
-    if(to) state.testOrders=JSON.parse(to);
+    if(cases) state.patients=dedup(JSON.parse(cases));
+    if(to) state.testOrders=dedup(JSON.parse(to));
     const ta=localStorage.getItem("cct_tasman");
-    if(ta) state.tasmanOrders=JSON.parse(ta);
-    if(rc) state.researchCases=JSON.parse(rc);
+    if(ta) state.tasmanOrders=dedup(JSON.parse(ta));
+    if(rc) state.researchCases=dedup(JSON.parse(rc));
   } catch(e) {}
 }
 
@@ -185,10 +187,10 @@ async function syncFromSheets() {
     const res=await fetch(`${SCRIPT_URL}?password=${encodeURIComponent(state.password)}`);
     const data=await res.json();
     if(data.error==="Unauthorized"){showToast("Sync failed — check password","error");state.syncing=false;render();return;}
-    if(data.cases) state.patients=data.cases;
-    if(data.testOrders) state.testOrders=data.testOrders;
-    if(data.tasmanOrders) state.tasmanOrders=data.tasmanOrders;
-    if(data.researchCases) state.researchCases=data.researchCases;
+    if(data.cases) state.patients=dedup(data.cases);
+    if(data.testOrders) state.testOrders=dedup(data.testOrders);
+    if(data.tasmanOrders) state.tasmanOrders=dedup(data.tasmanOrders);
+    if(data.researchCases) state.researchCases=dedup(data.researchCases);
     saveLocal(); state.lastSync=new Date();
     showToast("Synced ✓","success");
   } catch(e) { showToast("Sync failed — using local data","error"); }
