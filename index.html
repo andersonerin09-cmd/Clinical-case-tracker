@@ -150,6 +150,7 @@ function emptyResearchForm() {
 function dedup(arr) {
   return Object.values((arr||[]).reduce((acc,x)=>{if(x.id)acc[x.id]=x;return acc;},{}));
 }
+function todayISO() { return new Date().toISOString().split("T")[0]; }
 function normDate(str) { if(!str) return ""; return str.toString().slice(0,10); }
 function quickDate(days) { const d=new Date(); d.setDate(d.getDate()+days); return d.toISOString().split("T")[0]; }
 function fmtDate(str,long) {
