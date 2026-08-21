@@ -379,9 +379,9 @@ function renderTasmanHeader(){
 
 function renderTasmanFilterBar(){
   const oc=state.tasmanOrders.filter(isTestOrderOverdue).length;
-  const buttons=["All",...TEST_STATUSES,"No Status","Overdue"].map(status=>{
-    const active=(state.filterStatusTA||"All")===status;const isOD=status==="Overdue";const isNS=status==="No Status";
-    const count=status==="All"?state.tasmanOrders.length:isOD?oc:isNS?state.tasmanOrders.filter(o=>!o.status||o.status==="").length:state.tasmanOrders.filter(o=>o.status===status).length;
+  const buttons=["All","Incomplete",...TEST_STATUSES,"No Status","Overdue"].map(status=>{
+    const active=(state.filterStatusTA||"All")===status;const isOD=status==="Overdue";const isNS=status==="No Status";const isInc=status==="Incomplete";
+    const count=status==="All"?state.tasmanOrders.length:isOD?oc:isNS?state.tasmanOrders.filter(o=>!o.status||o.status==="").length:isInc?state.tasmanOrders.filter(o=>o.status!=="Complete").length:state.tasmanOrders.filter(o=>o.status===status).length;
     return el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?(isOD?"#dc2626":"#1e3a8a"):"#f1f5f9",color:active?"#fff":"#64748b",border:active?(isOD?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},onClick:()=>{state.filterStatusTA=status;render();}},`${isOD?"🔴 ":""}${status} (${count})`);
   });
   return makeFilterBar(state.searchTA,v=>{state.searchTA=v;render();},state.sortTA,[["dateEntered_desc","Newest first"],["dateEntered_asc","Oldest first"],["name","Name (A–Z)"]],v=>{state.sortTA=v;render();},buttons);
@@ -393,6 +393,7 @@ function renderTasmanList(){
   const ft=state.filterStatusTA||"All";
   if(ft==="Overdue") list=list.filter(isTestOrderOverdue);
   else if(ft==="No Status") list=list.filter(o=>!o.status||o.status==="");
+  else if(ft==="Incomplete") list=list.filter(o=>o.status!=="Complete");
   else if(ft!=="All") list=list.filter(o=>o.status===ft);
   if(state.searchTA&&state.searchTA.trim()){const q=state.searchTA.toLowerCase();list=list.filter(o=>(o.name||"").toLowerCase().includes(q)||(o.testRequired||"").toLowerCase().includes(q));}
   const st=state.sortTA||"dateEntered_desc";
@@ -574,9 +575,9 @@ function renderFilterBar(){
 
 function renderTestOrdersFilterBar(){
   const oc=state.testOrders.filter(isTestOrderOverdue).length;
-  const buttons=["All",...TEST_STATUSES,"No Status","Overdue"].map(status=>{
-    const active=(state.filterStatusTO||"All")===status;const isOD=status==="Overdue";const isNS=status==="No Status";
-    const count=status==="All"?state.testOrders.length:isOD?oc:isNS?state.testOrders.filter(o=>!o.status||o.status==="").length:state.testOrders.filter(o=>o.status===status).length;
+  const buttons=["All","Incomplete",...TEST_STATUSES,"No Status","Overdue"].map(status=>{
+    const active=(state.filterStatusTO||"All")===status;const isOD=status==="Overdue";const isNS=status==="No Status";const isInc=status==="Incomplete";
+    const count=status==="All"?state.testOrders.length:isOD?oc:isNS?state.testOrders.filter(o=>!o.status||o.status==="").length:isInc?state.testOrders.filter(o=>o.status!=="Complete").length:state.testOrders.filter(o=>o.status===status).length;
     return el("button",{style:{padding:"3px 9px",borderRadius:"20px",fontSize:"10px",fontWeight:"700",background:active?(isOD?"#dc2626":"#1e3a8a"):"#f1f5f9",color:active?"#fff":"#64748b",border:active?(isOD?"1.5px solid #dc2626":"1.5px solid #1e3a8a"):"1.5px solid #e2e8f0"},onClick:()=>{state.filterStatusTO=status;render();}},`${isOD?"🔴 ":""}${status} (${count})`);
   });
   return makeFilterBar(state.searchTO,v=>{state.searchTO=v;render();},state.sortTO,[["dateEntered_desc","Newest first"],["dateEntered_asc","Oldest first"],["name","Name (A–Z)"]],v=>{state.sortTO=v;render();},buttons);
@@ -622,6 +623,7 @@ function renderTestOrdersList(){
   const ft=state.filterStatusTO||"All";
   if(ft==="Overdue") list=list.filter(isTestOrderOverdue);
   else if(ft==="No Status") list=list.filter(o=>!o.status||o.status==="");
+  else if(ft==="Incomplete") list=list.filter(o=>o.status!=="Complete");
   else if(ft!=="All") list=list.filter(o=>o.status===ft);
   if(state.searchTO&&state.searchTO.trim()){const q=state.searchTO.toLowerCase();list=list.filter(o=>(o.name||"").toLowerCase().includes(q)||(o.testRequired||"").toLowerCase().includes(q));}
   const st=state.sortTO||"dateEntered_desc";
